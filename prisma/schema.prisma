@@ -1,0 +1,51 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  FINANZAS
+}
+
+model User {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  password  String
+  role      Role
+  name      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// Config de integración con Odoo, administrada por SUPER_ADMIN desde el
+// panel (nunca por variables de entorno). `uid` es el id del usuario de
+// Odoo dueño del API key — execute_kw lo pide siempre junto con la key
+// (ver ejemplo de JSON-RPC que compartiste). `expiresAt` se calcula al
+// crear/rotar la key como now() + durationDays.
+//
+// TODO: estructura sujeta a cambio cuando definas el flujo completo de
+// rotación desde el panel (ej. si se guarda historial de keys viejas).
+model OdooConfig {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  apiKey       String
+  uid          Int
+  durationDays Int      @default(30)
+  expiresAt    DateTime
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("odoo_config")
+}
