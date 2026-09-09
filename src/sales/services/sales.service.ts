@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
-import { OdooMany2One } from '../../odoo/types/odoo-common.types.js';
+import { OdooMany2One, OdooSearchReadOptions } from '../../odoo/types/odoo-common.types.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
@@ -13,13 +13,20 @@ import {
   TopProductDoc,
 } from '../doc/sales.doc.js';
 
-// Tope de seguridad para las consultas internas que necesitan "todo lo
-// que matchea" (no son la lista paginada que ve el frontend, sino datos
+// Tamaño de página para las consultas internas que necesitan "todo lo que
+// matchea" (no son la lista paginada que ve el frontend, sino datos
 // intermedios para agregar: sesiones del rango, órdenes de esas sesiones,
-// líneas de esas órdenes). Con 4 tiendas y rangos de fecha razonables no
-// debería acercarse a este número — si algún día se topa, hay que
-// paginar de verdad esta parte (loop con offset) en vez de subir el tope.
-const INTERNAL_FETCH_CAP = 2000;
+// líneas de esas órdenes). fetchAllPages() pagina de verdad con offset
+// hasta traer todo, así que esto es solo el tamaño de cada viaje a Odoo,
+// no un tope de resultados.
+const INTERNAL_PAGE_SIZE = 1000;
+
+// Tope de seguridad para que un bug de paginación (o un volumen de datos
+// absurdo) no deje a fetchAllPages() en un loop infinito o trayendo
+// millones de registros a memoria. Muy por encima de cualquier volumen
+// real esperado (4 tiendas) — si algún día se topa, hay que revisar por
+// qué hay tantos registros, no solo subir el número.
+const INTERNAL_FETCH_HARD_CAP = 50_000;
 
 function many2OneToRef(value: OdooMany2One): RefDoc | null {
   return value ? { id: value[0], name: value[1] } : null;
@@ -54,6 +61,35 @@ export class SalesService {
 
   constructor(private readonly odooService: OdooService) {}
 
+  // Trae TODO lo que matchea un domain, paginando de verdad con offset en
+  // vez de un solo fetch con límite alto — un solo fetch con límite trunca
+  // silenciosamente en cuanto el rango de fechas junta más registros que
+  // el límite (ver bug de "Visitas solo muestra los últimos ~24 días de
+  // un rango de 90": con 4 tiendas, 90 días ya pasan de miles de órdenes,
+  // y sin `order` explícito Odoo devuelve más reciente primero, así que
+  // el corte se comía justo los días viejos del rango).
+  private async fetchAllPages<T>(
+    fetchPage: (options: OdooSearchReadOptions) => Promise<T[]>,
+    domain: unknown[],
+    contextLabel: string,
+  ): Promise<T[]> {
+    const all: T[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await fetchPage({ domain, limit: INTERNAL_PAGE_SIZE, offset });
+      all.push(...page);
+      if (page.length < INTERNAL_PAGE_SIZE) break;
+      offset += INTERNAL_PAGE_SIZE;
+      if (all.length >= INTERNAL_FETCH_HARD_CAP) {
+        this.logger.warn(
+          `${contextLabel} tocó el tope de seguridad de ${INTERNAL_FETCH_HARD_CAP} registros — revisar si hace falta subirlo.`,
+        );
+        break;
+      }
+    }
+    return all;
+  }
+
   // Agrupamos por fecha de SESIÓN (no de orden): se resuelven primero las
   // pos.session dentro del rango + tienda, y desde ahí se sabe qué
   // órdenes pertenecen a cuál sesión/tienda/día.
@@ -70,17 +106,11 @@ export class SalesService {
       domain.push(['config_id', '=', posConfigId]);
     }
 
-    const sessions = await this.odooService.findPosSessions({
+    const sessions = await this.fetchAllPages(
+      (options) => this.odooService.findPosSessions(options),
       domain,
-      limit: INTERNAL_FETCH_CAP,
-      order: 'start_at asc',
-    });
-
-    if (sessions.length === INTERNAL_FETCH_CAP) {
-      this.logger.warn(
-        `resolveSessions tocó el tope de ${INTERNAL_FETCH_CAP} — hace falta paginar de verdad este lookup.`,
-      );
-    }
+      'resolveSessions',
+    );
 
     const sessionRefById = new Map<number, { session: RefDoc; posConfig: RefDoc; date: string }>();
     for (const session of sessions) {
@@ -154,32 +184,24 @@ export class SalesService {
     }
 
     // Se excluyen las órdenes canceladas: no se "vendió" nada en ellas.
-    const orders = await this.odooService.findPosOrders({
-      domain: [
+    const orders = await this.fetchAllPages(
+      (options) => this.odooService.findPosOrders(options),
+      [
         ['session_id', 'in', sessionIds],
         ['state', '!=', 'cancel'],
       ],
-      limit: INTERNAL_FETCH_CAP,
-    });
-    if (orders.length === INTERNAL_FETCH_CAP) {
-      this.logger.warn(
-        `findTopProducts (órdenes) tocó el tope de ${INTERNAL_FETCH_CAP} — hace falta paginar de verdad este lookup.`,
-      );
-    }
+      'findTopProducts (órdenes)',
+    );
     if (orders.length === 0) {
       return [];
     }
 
     const orderIds = orders.map((order) => order.id);
-    const lines = await this.odooService.findPosOrderLines({
-      domain: [['order_id', 'in', orderIds]],
-      limit: INTERNAL_FETCH_CAP,
-    });
-    if (lines.length === INTERNAL_FETCH_CAP) {
-      this.logger.warn(
-        `findTopProducts (líneas) tocó el tope de ${INTERNAL_FETCH_CAP} — hace falta paginar de verdad este lookup.`,
-      );
-    }
+    const lines = await this.fetchAllPages(
+      (options) => this.odooService.findPosOrderLines(options),
+      [['order_id', 'in', orderIds]],
+      'findTopProducts (líneas)',
+    );
 
     const totalsByProduct = new Map<number, TopProductDoc>();
     for (const line of lines) {
@@ -222,18 +244,14 @@ export class SalesService {
     }
 
     if (sessionIds.length > 0) {
-      const orders = await this.odooService.findPosOrders({
-        domain: [
+      const orders = await this.fetchAllPages(
+        (options) => this.odooService.findPosOrders(options),
+        [
           ['session_id', 'in', sessionIds],
           ['state', '!=', 'cancel'],
         ],
-        limit: INTERNAL_FETCH_CAP,
-      });
-      if (orders.length === INTERNAL_FETCH_CAP) {
-        this.logger.warn(
-          `findDailySummary tocó el tope de ${INTERNAL_FETCH_CAP} — hace falta paginar de verdad este lookup.`,
-        );
-      }
+        'findDailySummary',
+      );
 
       for (const order of orders) {
         const sessionId = order.session_id ? order.session_id[0] : undefined;
