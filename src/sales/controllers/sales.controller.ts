@@ -6,6 +6,7 @@ import { SalesService } from '../services/sales.service.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
+import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
 
 // SUPER_ADMIN y FINANZAS pueden ambos acceder a Ventas (ver CLAUDE.md,
 // "Autorización": FINANZAS solo puede acceder a ventas/reportes/finanzas).
@@ -50,5 +51,20 @@ export class SalesController {
   @ApiOperation({ summary: 'Tiendas activas (pos.config) — para el filtro del dashboard' })
   findStores() {
     return this.salesService.findStores();
+  }
+
+  @Get('reconciliation')
+  @ApiOperation({
+    summary: 'Diagnóstico: compara el conteo por fecha de sesión vs. por fecha de orden individual',
+    description:
+      'Para cada tienda en el rango pedido, devuelve el total de órdenes/venta según los 2 métodos posibles de ' +
+      'agrupar por día (fecha de SESIÓN — el que usa el resto de la app — vs. fecha de la orden individual), la ' +
+      'diferencia entre ambos, un desglose por estado, y la lista puntual de órdenes donde los 2 métodos no ' +
+      'coinciden (las que caen justo en el borde de medianoche). Pensado para explicar diferencias contra un ' +
+      'conteo externo (ej. un Excel) sin tener que investigar caso por caso — no cambia cómo cuenta el resto de ' +
+      'la app.',
+  })
+  getReconciliation(@Query() query: FindReconciliationQueryDto) {
+    return this.salesService.getReconciliation(query);
   }
 }

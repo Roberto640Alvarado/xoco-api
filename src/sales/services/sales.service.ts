@@ -4,9 +4,12 @@ import { OdooMany2One, OdooSearchReadOptions } from '../../odoo/types/odoo-commo
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
+import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
 import {
   DailySalesDoc,
   PaginatedOrdersDoc,
+  ReconciliationOrderDoc,
+  ReconciliationStoreDoc,
   RefDoc,
   SalesOrderDoc,
   StoreDoc,
@@ -37,6 +40,13 @@ function many2OneToRef(value: OdooMany2One): RefDoc | null {
 // usuario) — nunca la fecha de la orden individual.
 function toDateOnly(value: string): string {
   return value.slice(0, 10);
+}
+
+// Suma (o resta, con `days` negativo) días a una fecha YYYY-MM-DD.
+function shiftDate(date: string, days: number): string {
+  const cursor = new Date(`${date}T00:00:00Z`);
+  cursor.setUTCDate(cursor.getUTCDate() + days);
+  return cursor.toISOString().slice(0, 10);
 }
 
 function enumerateDates(dateFrom: string, dateTo: string): string[] {
@@ -277,5 +287,127 @@ export class SalesService {
       order: 'name asc',
     });
     return configs.map((config) => ({ id: config.id, name: config.name }));
+  }
+
+  // Reporte de diagnóstico: compara, para cada tienda, cuántas órdenes
+  // (y cuánta venta) da el rango pedido según los 2 métodos posibles de
+  // "a qué día pertenece una orden" — por fecha de SESIÓN (start_at, lo
+  // que usa el resto de la app) vs. por date_order (la fecha/hora propia
+  // de la orden individual). Surgió al investigar por qué "Tráfico de
+  // tiendas" no siempre cuadra 1:1 contra un conteo manual (ej. un
+  // Excel): las tiendas que cierran después de medianoche tienen
+  // órdenes cuyo date_order cae al día siguiente aunque pertenezcan a la
+  // sesión del día anterior — un conteo manual que no distinguió entre
+  // ambos métodos puede terminar corriendo esas órdenes de un día a
+  // otro. Este endpoint no cambia cómo cuenta el resto de la app (la
+  // fecha de sesión sigue siendo la oficial) — es una herramienta de
+  // reconciliación para diagnosticar diferencias puntuales.
+  async getReconciliation(query: FindReconciliationQueryDto): Promise<ReconciliationStoreDoc[]> {
+    const dateFrom = query.dateFrom;
+    const dateTo = query.dateTo ?? query.dateFrom;
+
+    // Se trae una ventana 1 día más ancha a cada lado: una orden puede
+    // caer dentro del rango pedido por date_order aunque su sesión haya
+    // empezado el día anterior (o viceversa), y esas son justo las que
+    // hay que detectar.
+    const wideFrom = shiftDate(dateFrom, -1);
+    const wideTo = shiftDate(dateTo, 1);
+
+    const { sessionIds, sessionRefById } = await this.resolveSessions(wideFrom, wideTo, query.posConfigId);
+
+    // Se trae SIEMPRE la lista completa de tiendas (para tener el nombre
+    // real), aunque después se filtre a una sola si vino posConfigId —
+    // así el reporte no muestra el nombre vacío cuando se pide una
+    // tienda puntual.
+    const allStores = await this.findStores();
+    const stores = query.posConfigId
+      ? allStores.filter((store) => store.id === query.posConfigId)
+      : allStores;
+    const storeNameById = new Map(allStores.map((store) => [store.id, store.name]));
+
+    const resultByStore = new Map<number, ReconciliationStoreDoc>();
+    function getOrInit(posConfigId: number, storeName: string): ReconciliationStoreDoc {
+      let entry = resultByStore.get(posConfigId);
+      if (!entry) {
+        entry = {
+          posConfigId,
+          storeName,
+          bySessionMethod: { orderCount: 0, totalRevenue: 0 },
+          byOrderDateMethod: { orderCount: 0, totalRevenue: 0 },
+          orderCountDifference: 0,
+          stateBreakdown: {},
+          boundaryOrders: [],
+        };
+        resultByStore.set(posConfigId, entry);
+      }
+      return entry;
+    }
+
+    if (sessionIds.length > 0) {
+      const orders = await this.fetchAllPages(
+        (options) => this.odooService.findPosOrders(options),
+        [['session_id', 'in', sessionIds]],
+        'getReconciliation',
+      );
+
+      for (const order of orders) {
+        const sessionId = order.session_id ? order.session_id[0] : undefined;
+        const refs = sessionId ? sessionRefById.get(sessionId) : undefined;
+        if (!refs) continue;
+
+        const posConfigId = refs.posConfig.id;
+        const storeName = storeNameById.get(posConfigId) ?? refs.posConfig.name;
+        const sessionDate = refs.date;
+        const orderDate = toDateOnly(order.date_order);
+
+        const inSessionRange = sessionDate >= dateFrom && sessionDate <= dateTo;
+        const inOrderDateRange = orderDate >= dateFrom && orderDate <= dateTo;
+        // Fuera de los dos rangos: la orden solo aparece por el margen
+        // de 1 día de la ventana ampliada, no aporta nada a este reporte.
+        if (!inSessionRange && !inOrderDateRange) continue;
+
+        const entry = getOrInit(posConfigId, storeName);
+
+        entry.stateBreakdown[order.state] = (entry.stateBreakdown[order.state] ?? 0) + 1;
+
+        const countsAsSale = order.state !== 'cancel';
+        if (inSessionRange && countsAsSale) {
+          entry.bySessionMethod.orderCount += 1;
+          entry.bySessionMethod.totalRevenue += order.amount_total;
+        }
+        if (inOrderDateRange && countsAsSale) {
+          entry.byOrderDateMethod.orderCount += 1;
+          entry.byOrderDateMethod.totalRevenue += order.amount_total;
+        }
+
+        if (inSessionRange !== inOrderDateRange) {
+          const boundaryOrder: ReconciliationOrderDoc = {
+            id: order.id,
+            name: order.name,
+            state: order.state,
+            dateOrder: order.date_order,
+            sessionDate,
+            amountTotal: order.amount_total,
+            includedBySessionMethod: inSessionRange,
+            includedByOrderDateMethod: inOrderDateRange,
+          };
+          entry.boundaryOrders.push(boundaryOrder);
+        }
+      }
+    }
+
+    // Tiendas sin ninguna orden en el rango también aparecen, en ceros
+    // (igual que el resto de reportes de la app).
+    for (const store of stores) {
+      getOrInit(store.id, store.name);
+    }
+
+    return [...resultByStore.values()]
+      .map((entry) => ({
+        ...entry,
+        orderCountDifference: entry.bySessionMethod.orderCount - entry.byOrderDateMethod.orderCount,
+        boundaryOrders: entry.boundaryOrders.sort((a, b) => (a.dateOrder < b.dateOrder ? -1 : 1)),
+      }))
+      .sort((a, b) => a.storeName.localeCompare(b.storeName));
   }
 }
