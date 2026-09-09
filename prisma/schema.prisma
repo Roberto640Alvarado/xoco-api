@@ -69,3 +69,24 @@ model StoreGoal {
   @@unique([posConfigId, year, month])
   @@map("store_goals")
 }
+
+// % de crecimiento mensual de VENTA ($) por tienda — mismo mecanismo que
+// StoreGoal (arriba), pero para el módulo "Venta Mensual" (monto en
+// dólares, no cantidad de órdenes). Es un % PROPIO e independiente del de
+// StoreGoal: crecer en ventas ($) y crecer en visitas (órdenes) son metas
+// distintas (ver plan-history de sales-goals). "Meta del mes" tampoco se
+// guarda acá: se calcula al vuelo en SalesGoalsService, encadenada sobre
+// la meta del mes anterior (mismo diseño que GoalsService.
+// resolveTargetOrders, aplicado a totalRevenue).
+model StoreSalesGoal {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  posConfigId    Int
+  year           Int
+  month          Int
+  growthPercent  Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([posConfigId, year, month])
+  @@map("store_sales_goals")
+}
