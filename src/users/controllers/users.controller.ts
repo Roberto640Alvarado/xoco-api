@@ -7,6 +7,7 @@ import { User } from '../../common/decorators/user.decorator.js';
 import { UsersService } from '../services/users.service.js';
 import { CreateUserDto } from '../dto/create-user.dto.js';
 import { SetUserActiveDto } from '../dto/set-user-active.dto.js';
+import { SetUserPasswordDto } from '../dto/set-user-password.dto.js';
 import { UserResponseDoc } from '../doc/user-response.doc.js';
 
 // Exclusivo de SUPER_ADMIN (ver CLAUDE.md, "Autorización") — FINANZAS no
@@ -56,6 +57,24 @@ export class UsersController {
     @User('id') actingUserId: string,
   ): Promise<UserResponseDoc> {
     const user = await this.usersService.setActive(id, dto.isActive, actingUserId);
+    return plainToInstance(UserResponseDoc, user, { excludeExtraneousValues: true });
+  }
+
+  @Patch(':id/password')
+  @ApiOperation({
+    summary: 'Restablece la contraseña de una cuenta existente.',
+    description:
+      '`password` y `confirmPassword` deben coincidir. No hay envío de correo: el admin comparte la nueva ' +
+      'contraseña con el usuario por su cuenta.',
+  })
+  @ApiResponse({ status: 200, type: UserResponseDoc })
+  @ApiResponse({ status: 400, description: 'Las contraseñas no coinciden, o son inválidas.' })
+  @ApiResponse({ status: 404, description: 'Usuario no encontrado.' })
+  async setPassword(
+    @Param('id') id: string,
+    @Body() dto: SetUserPasswordDto,
+  ): Promise<UserResponseDoc> {
+    const user = await this.usersService.setPassword(id, dto);
     return plainToInstance(UserResponseDoc, user, { excludeExtraneousValues: true });
   }
 }

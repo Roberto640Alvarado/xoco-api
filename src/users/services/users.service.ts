@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import * as bcrypt from 'bcryptjs';
 import { UsersRepository } from '../repositories/users.repository.js';
 import { CreateUserDto } from '../dto/create-user.dto.js';
+import { SetUserPasswordDto } from '../dto/set-user-password.dto.js';
 
 // Costo de bcrypt — mismo valor que usa prisma/seed.mjs para el
 // SUPER_ADMIN inicial, para que todas las cuentas queden hasheadas igual
@@ -71,5 +72,23 @@ export class UsersService {
     }
 
     return this.usersRepository.setActive(targetUserId, isActive);
+  }
+
+  // Restablece la contraseña de una cuenta existente — mismo criterio que
+  // createUser (password + confirmPassword deben coincidir, se hashea al
+  // mismo costo). No hay envío de correo: el admin se la comparte al
+  // usuario por su cuenta, igual que al crear la cuenta.
+  async setPassword(targetUserId: string, dto: SetUserPasswordDto) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Las contraseñas no coinciden.');
+    }
+
+    const target = await this.usersRepository.findById(targetUserId);
+    if (!target) {
+      throw new NotFoundException('Usuario no encontrado.');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_COST);
+    return this.usersRepository.setPassword(targetUserId, hashedPassword);
   }
 }

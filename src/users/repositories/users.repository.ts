@@ -41,4 +41,8 @@ export class UsersRepository {
   setActive(id: string, isActive: boolean) {
     return this.prisma.user.update({ where: { id }, data: { isActive } });
   }
+
+  setPassword(id: string, hashedPassword: string) {
+    return this.prisma.user.update({ where: { id }, data: { password: hashedPassword } });
+  }
 }
