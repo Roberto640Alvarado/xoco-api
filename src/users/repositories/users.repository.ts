@@ -9,6 +9,12 @@ interface CreateUserData {
   hashedPassword: string;
 }
 
+interface UpdateUserData {
+  email: string;
+  name: string | null;
+  role: Role;
+}
+
 // Único acceso a datos permitido a la colección users — el resto de la
 // app pasa siempre por UsersService, nunca por Prisma directo.
 @Injectable()
@@ -44,5 +50,9 @@ export class UsersRepository {
 
   setPassword(id: string, hashedPassword: string) {
     return this.prisma.user.update({ where: { id }, data: { password: hashedPassword } });
+  }
+
+  updateUser(id: string, data: UpdateUserData) {
+    return this.prisma.user.update({ where: { id }, data });
   }
 }

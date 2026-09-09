@@ -3,6 +3,7 @@ import * as bcrypt from 'bcryptjs';
 import { UsersRepository } from '../repositories/users.repository.js';
 import { CreateUserDto } from '../dto/create-user.dto.js';
 import { SetUserPasswordDto } from '../dto/set-user-password.dto.js';
+import { UpdateUserDto } from '../dto/update-user.dto.js';
 
 // Costo de bcrypt — mismo valor que usa prisma/seed.mjs para el
 // SUPER_ADMIN inicial, para que todas las cuentas queden hasheadas igual
@@ -90,5 +91,35 @@ export class UsersService {
 
     const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_COST);
     return this.usersRepository.setPassword(targetUserId, hashedPassword);
+  }
+
+  // Edita correo/nombre/rol de una cuenta existente (nunca la contraseña,
+  // ver setPassword). Un SUPER_ADMIN no puede cambiar su propio rol desde
+  // acá — mismo criterio de "no quedarte afuera sin que nadie más pueda
+  // arreglarlo" que ya aplica setActive con la auto-desactivación; sí
+  // puede editar su propio correo/nombre sin restricción.
+  async updateUser(targetUserId: string, dto: UpdateUserDto, actingUserId: string) {
+    const target = await this.usersRepository.findById(targetUserId);
+    if (!target) {
+      throw new NotFoundException('Usuario no encontrado.');
+    }
+
+    const email = dto.email.toLowerCase().trim();
+    if (email !== target.email) {
+      const existing = await this.usersRepository.findByEmail(email);
+      if (existing) {
+        throw new ConflictException('Ya existe un usuario con ese correo.');
+      }
+    }
+
+    if (dto.role !== target.role && targetUserId === actingUserId) {
+      throw new ForbiddenException('No puedes cambiar tu propio rol.');
+    }
+
+    return this.usersRepository.updateUser(targetUserId, {
+      email,
+      name: dto.name?.trim() || null,
+      role: dto.role,
+    });
   }
 }

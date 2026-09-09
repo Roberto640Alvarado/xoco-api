@@ -8,6 +8,7 @@ import { UsersService } from '../services/users.service.js';
 import { CreateUserDto } from '../dto/create-user.dto.js';
 import { SetUserActiveDto } from '../dto/set-user-active.dto.js';
 import { SetUserPasswordDto } from '../dto/set-user-password.dto.js';
+import { UpdateUserDto } from '../dto/update-user.dto.js';
 import { UserResponseDoc } from '../doc/user-response.doc.js';
 
 // Exclusivo de SUPER_ADMIN (ver CLAUDE.md, "Autorización") — FINANZAS no
@@ -75,6 +76,22 @@ export class UsersController {
     @Body() dto: SetUserPasswordDto,
   ): Promise<UserResponseDoc> {
     const user = await this.usersService.setPassword(id, dto);
+    return plainToInstance(UserResponseDoc, user, { excludeExtraneousValues: true });
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Edita correo, nombre y rol de una cuenta existente.' })
+  @ApiResponse({ status: 200, type: UserResponseDoc })
+  @ApiResponse({ status: 400, description: 'El correo o el rol son inválidos.' })
+  @ApiResponse({ status: 403, description: 'Un SUPER_ADMIN no puede cambiar su propio rol.' })
+  @ApiResponse({ status: 404, description: 'Usuario no encontrado.' })
+  @ApiResponse({ status: 409, description: 'Ya existe otro usuario con ese correo.' })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @User('id') actingUserId: string,
+  ): Promise<UserResponseDoc> {
+    const user = await this.usersService.updateUser(id, dto, actingUserId);
     return plainToInstance(UserResponseDoc, user, { excludeExtraneousValues: true });
   }
 }
