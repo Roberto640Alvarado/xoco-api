@@ -5,7 +5,7 @@ export interface UpsertGoalData {
   posConfigId: number;
   year: number;
   month: number;
-  targetOrders: number;
+  growthPercent: number;
 }
 
 // Único acceso a datos permitido a la colección store_goals — el resto de
@@ -19,7 +19,7 @@ export class GoalsRepository {
   }
 
   // Un doc por tienda+año+mes (índice único en el schema) — si ya existe
-  // la meta de ese mes para esa tienda, se sobreescribe.
+  // el % de ese mes para esa tienda, se sobreescribe.
   upsert(data: UpsertGoalData) {
     return this.prisma.storeGoal.upsert({
       where: {
@@ -29,8 +29,15 @@ export class GoalsRepository {
           month: data.month,
         },
       },
-      update: { targetOrders: data.targetOrders },
+      update: { growthPercent: data.growthPercent },
       create: data,
     });
+  }
+
+  // El modal del frontend siempre manda un lote (aunque sea de una sola
+  // tienda) — mismo % para todas o uno distinto por tienda, ver
+  // GoalsService.upsertBulk.
+  upsertMany(entries: UpsertGoalData[]) {
+    return Promise.all(entries.map((entry) => this.upsert(entry)));
   }
 }

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SalesService } from '../../sales/services/sales.service.js';
 import { GoalsRepository } from '../repositories/goals.repository.js';
-import { UpsertGoalDto } from '../dto/upsert-goal.dto.js';
+import { UpsertGoalsBulkDto } from '../dto/upsert-goals-bulk.dto.js';
 import { FindGoalsSummaryQueryDto } from '../dto/find-goals-summary-query.dto.js';
 import { GoalSummaryItemDoc, StoreGoalDoc } from '../doc/goals.doc.js';
 
@@ -13,6 +13,14 @@ function toIsoDate(year: number, month: number, day: number): string {
   return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
+function daysInMonthOf(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function previousMonthOf(year: number, month: number): { year: number; month: number } {
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+}
+
 @Injectable()
 export class GoalsService {
   constructor(
@@ -20,28 +28,37 @@ export class GoalsService {
     private readonly salesService: SalesService,
   ) {}
 
-  async upsert(dto: UpsertGoalDto): Promise<StoreGoalDoc> {
-    const goal = await this.goalsRepository.upsert(dto);
-    return {
+  async upsertBulk(dto: UpsertGoalsBulkDto): Promise<StoreGoalDoc[]> {
+    const goals = await this.goalsRepository.upsertMany(
+      dto.entries.map((entry) => ({
+        posConfigId: entry.posConfigId,
+        year: dto.year,
+        month: dto.month,
+        growthPercent: entry.growthPercent,
+      })),
+    );
+
+    return goals.map((goal) => ({
       id: goal.id,
       posConfigId: goal.posConfigId,
       year: goal.year,
       month: goal.month,
-      targetOrders: goal.targetOrders,
+      growthPercent: goal.growthPercent,
       updatedAt: goal.updatedAt,
-    };
+    }));
   }
 
-  // Combina la meta guardada (Mongo) con lo real (Odoo, vía SalesService)
-  // para cada tienda activa, y calcula Alcance + una proyección de cierre
-  // de mes por ritmo diario (ver GoalSummaryItemDoc para el detalle de
-  // cada campo).
+  // Combina el % de crecimiento guardado (Mongo) con lo real de Odoo (vía
+  // SalesService, mismo agregado que usa Visitas) para cada tienda activa:
+  // "Meta del mes" se deriva del total real del mes ANTERIOR, nunca de un
+  // número guardado a mano (ver GoalSummaryItemDoc para el detalle de cada
+  // campo).
   async getSummary(query: FindGoalsSummaryQueryDto): Promise<GoalSummaryItemDoc[]> {
     const { year, month } = query;
 
     const now = new Date();
     const isCurrentMonth = year === now.getUTCFullYear() && month === now.getUTCMonth() + 1;
-    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const daysInMonth = daysInMonthOf(year, month);
 
     // "Hasta ayer" para el mes en curso — el día de hoy todavía no cerró
     // (mismo criterio que "Fecha actualización" = TODAY()-1 en el Excel
@@ -63,29 +80,48 @@ export class GoalsService {
     }
     const dateFrom = toIsoDate(year, month, 1);
 
+    const prev = previousMonthOf(year, month);
+    const prevDaysInMonth = daysInMonthOf(prev.year, prev.month);
+    const prevDateFrom = toIsoDate(prev.year, prev.month, 1);
+    const prevDateTo = toIsoDate(prev.year, prev.month, prevDaysInMonth);
+
     const [stores, goals] = await Promise.all([
       this.salesService.findStores(),
       this.goalsRepository.findManyForMonth(year, month),
     ]);
-    const targetByStore = new Map(goals.map((goal) => [goal.posConfigId, goal.targetOrders]));
+    const growthByStore = new Map(goals.map((goal) => [goal.posConfigId, goal.growthPercent]));
 
     return Promise.all(
       stores.map(async (store) => {
-        const actualOrders =
+        const [currentMonthDays, previousMonthDays] = await Promise.all([
           dateTo === null
-            ? 0
-            : (
-                await this.salesService.findDailySummary({ dateFrom, dateTo, posConfigId: store.id })
-              ).reduce((sum, day) => sum + day.orderCount, 0);
+            ? Promise.resolve([])
+            : this.salesService.findDailySummary({ dateFrom, dateTo, posConfigId: store.id }),
+          this.salesService.findDailySummary({
+            dateFrom: prevDateFrom,
+            dateTo: prevDateTo,
+            posConfigId: store.id,
+          }),
+        ]);
 
-        const targetOrders = targetByStore.get(store.id) ?? null;
+        const actualOrders = currentMonthDays.reduce((sum, day) => sum + day.orderCount, 0);
+        const previousMonthActualOrders = previousMonthDays.reduce((sum, day) => sum + day.orderCount, 0);
+
+        const growthPercent = growthByStore.get(store.id) ?? null;
+        const targetOrders =
+          growthPercent != null ? Math.round(previousMonthActualOrders * (1 + growthPercent)) : null;
+
         const reachPercent = targetOrders ? actualOrders / targetOrders : null;
+        const missingOrders = targetOrders != null ? targetOrders - actualOrders : null;
+        // "Visitas Diarias Necesarias": el mismo valor que "faltantes a la
+        // fecha", tal como lo pidió el usuario (así está también en el
+        // Excel original) — no una división por días restantes.
+        const dailyNeededOrders = missingOrders;
 
-        const projectedOrders = isCurrentMonth
-          ? daysElapsed > 0
-            ? Math.round((actualOrders / daysElapsed) * daysInMonth)
-            : 0
-          : actualOrders;
+        const projectedOrders =
+          isCurrentMonth && daysElapsed === 0
+            ? 0
+            : Math.round((actualOrders / daysElapsed) * daysInMonth);
         const projectedReachPercent = targetOrders ? projectedOrders / targetOrders : null;
 
         const item: GoalSummaryItemDoc = {
@@ -93,9 +129,13 @@ export class GoalsService {
           storeName: store.name,
           year,
           month,
+          growthPercent,
+          previousMonthActualOrders,
           targetOrders,
           actualOrders,
           reachPercent,
+          missingOrders,
+          dailyNeededOrders,
           isCurrentMonth,
           daysElapsed,
           daysInMonth,

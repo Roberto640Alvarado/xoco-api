@@ -50,19 +50,21 @@ model OdooConfig {
   @@map("odoo_config")
 }
 
-// Meta mensual de órdenes ("visitas") por tienda. Un doc por
-// tienda+año+mes — se sobreescribe (upsert) si el usuario vuelve a
-// guardar la meta de un mes que ya tenía una. La comparación contra lo
-// real (Alcance/Proyección) se calcula al vuelo en GoalsService a partir
-// de las órdenes reales de Odoo, nunca se guarda aquí.
+// % de crecimiento mensual de visitas (órdenes) por tienda, sobre el
+// total REAL del mes anterior (ver "Trafico de tiendas" / Dashboard
+// Mercadeo.xlsx original). Un doc por tienda+año+mes — se sobreescribe
+// (upsert) si el usuario vuelve a guardar el % de un mes que ya tenía
+// uno. "Meta del mes" NUNCA se guarda aquí: se calcula al vuelo en
+// GoalsService como totalRealMesAnterior * (1 + growthPercent), a partir
+// de las órdenes reales de Odoo.
 model StoreGoal {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  posConfigId  Int
-  year         Int
-  month        Int
-  targetOrders Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  posConfigId    Int
+  year           Int
+  month          Int
+  growthPercent  Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@unique([posConfigId, year, month])
   @@map("store_goals")
