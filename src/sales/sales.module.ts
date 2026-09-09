@@ -7,5 +7,6 @@ import { SalesService } from './services/sales.service.js';
   imports: [OdooModule],
   controllers: [SalesController],
   providers: [SalesService],
+  exports: [SalesService],
 })
 export class SalesModule {}
