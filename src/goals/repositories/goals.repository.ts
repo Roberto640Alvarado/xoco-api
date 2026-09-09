@@ -18,6 +18,13 @@ export class GoalsRepository {
     return this.prisma.storeGoal.findMany({ where: { year, month } });
   }
 
+  // Historial completo (todos los años/meses) de las tiendas dadas — lo
+  // necesita GoalsService para resolver la cadena "meta del mes N depende
+  // de la meta del mes N-1", que puede mirar hacia atrás más de un mes.
+  findManyForStores(posConfigIds: number[]) {
+    return this.prisma.storeGoal.findMany({ where: { posConfigId: { in: posConfigIds } } });
+  }
+
   // Un doc por tienda+año+mes (índice único en el schema) — si ya existe
   // el % de ese mes para esa tienda, se sobreescribe.
   upsert(data: UpsertGoalData) {
