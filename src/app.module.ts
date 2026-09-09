@@ -9,6 +9,7 @@ import { OdooModule } from './odoo/odoo.module.js';
 import { SalesModule } from './sales/sales.module.js';
 import { GoalsModule } from './goals/goals.module.js';
 import { SalesGoalsModule } from './sales-goals/sales-goals.module.js';
+import { TicketGoalsModule } from './ticket-goals/ticket-goals.module.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { RolesGuard } from './common/guards/roles.guard.js';
 
@@ -26,7 +27,7 @@ import { RolesGuard } from './common/guards/roles.guard.js';
 // las credenciales reales (idealmente desde variables de entorno, no
 // hardcodeadas), y pasar `instrument: ObserveInstrument` en main.ts.
 @Module({
-  imports: [PrismaModule, UsersModule, AuthModule, OdooModule, SalesModule, GoalsModule, SalesGoalsModule],
+  imports: [PrismaModule, UsersModule, AuthModule, OdooModule, SalesModule, GoalsModule, SalesGoalsModule, TicketGoalsModule],
   controllers: [AppController],
   providers: [
     AppService,

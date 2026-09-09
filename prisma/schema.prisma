@@ -90,3 +90,23 @@ model StoreSalesGoal {
   @@unique([posConfigId, year, month])
   @@map("store_sales_goals")
 }
+
+// % de crecimiento mensual del TICKET PROMEDIO (venta / cantidad de
+// órdenes) por tienda — mismo mecanismo que StoreGoal/StoreSalesGoal
+// (arriba), pero para esta tercera métrica. % PROPIO e independiente de
+// los otros dos (ver plan-history de ticket-goals): igual que venta $ y
+// visitas pueden crecer a ritmos distintos, el ticket promedio también es
+// una meta de negocio separada (subir el ticket promedio sin más
+// visitas, por ejemplo).
+model StoreTicketGoal {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  posConfigId    Int
+  year           Int
+  month          Int
+  growthPercent  Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([posConfigId, year, month])
+  @@map("store_ticket_goals")
+}
