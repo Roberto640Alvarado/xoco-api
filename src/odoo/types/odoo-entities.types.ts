@@ -60,6 +60,10 @@ export interface OdooPosOrder {
   id: number;
   name: string;
   session_id: OdooMany2One;
+  // Tienda (pos.config) de la orden. Es un related de session_id.config_id,
+  // pero se consulta directo para poder filtrar/agrupar por tienda sin
+  // tener que resolver antes las sesiones.
+  config_id: OdooMany2One;
   partner_id: OdooMany2One;
   date_order: string;
   state: string;

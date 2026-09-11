@@ -3,7 +3,7 @@ import { IsDateString, IsInt, IsOptional, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class FindOrdersQueryDto {
-  @ApiPropertyOptional({ example: '2026-09-01', description: 'Fecha inicial (incluida), formato YYYY-MM-DD. Filtra por la fecha de la SESIÓN POS, no de la orden.' })
+  @ApiPropertyOptional({ example: '2026-09-01', description: 'Fecha inicial (incluida), formato YYYY-MM-DD. Filtra por el día LOCAL de la tienda en que se cobró la orden.' })
   @IsDateString()
   dateFrom!: string;
 

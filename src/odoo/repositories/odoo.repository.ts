@@ -185,6 +185,7 @@ export class OdooRepository {
           'id',
           'name',
           'session_id',
+          'config_id',
           'partner_id',
           'date_order',
           'state',

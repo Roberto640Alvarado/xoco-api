@@ -9,7 +9,8 @@ export interface RefDoc {
 export interface SalesOrderDoc {
   id: number;
   name: string;
-  dateOrder: string;
+  dateOrder: string; // fecha+hora cruda de Odoo, en UTC ("2026-09-08 01:04:31")
+  date: string; // YYYY-MM-DD — día LOCAL de la tienda al que pertenece la venta
   state: string;
   amountTotal: number;
   amountTax: number;
@@ -40,7 +41,7 @@ export interface TopProductDoc {
 }
 
 export interface DailySalesDoc {
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD — día local de la tienda
   orderCount: number;
   totalRevenue: number;
   totalTax: number;
@@ -51,23 +52,23 @@ export interface StoreDoc {
   name: string;
 }
 
-// Comparación de conteo/ingresos entre los 2 métodos posibles de agrupar
-// una orden en un día: por fecha de SESIÓN (start_at — el que usa toda
-// la app hoy, ver CLAUDE.md) vs. por fecha de la ORDEN individual
-// (date_order). Existe porque las tiendas que cierran después de
-// medianoche tienen órdenes cuya date_order cae en el día siguiente
-// aunque pertenezcan a la sesión del día anterior — eso puede explicar
-// diferencias contra un conteo manual (ej. un Excel) que no distinguió
-// entre ambos métodos. Ver plan-history "reconciliacion-visitas".
+// Comparación de conteo/ingresos entre los 2 métodos de agrupar una orden
+// en un día: por día LOCAL de `date_order` (el método oficial de la app, y
+// el que usan los reportes propios de Odoo) vs. por fecha de SESIÓN
+// (start_at en UTC — el método anterior al fix de septiembre 2026). Sirve
+// para explicar diferencias contra un conteo externo (ej. un Excel) o
+// contra un número histórico del panel. Ver plan-history
+// "reconciliacion-visitas" y "fix-dia-local-ventas".
 export interface ReconciliationOrderDoc {
   id: number;
   name: string;
   state: string;
-  dateOrder: string; // fecha+hora de la orden individual (date_order de Odoo)
-  sessionDate: string; // YYYY-MM-DD — fecha de la sesión a la que pertenece (método de la app)
+  dateOrder: string; // fecha+hora cruda de la orden, en UTC (date_order de Odoo)
+  storeDate: string; // YYYY-MM-DD — día local de la tienda (método oficial)
+  sessionDate: string | null; // YYYY-MM-DD (UTC) en que abrió su sesión; null si abrió fuera de la ventana revisada
   amountTotal: number;
+  includedByStoreDayMethod: boolean; // ¿cae dentro del rango pedido usando el día local?
   includedBySessionMethod: boolean; // ¿cae dentro del rango pedido usando la fecha de sesión?
-  includedByOrderDateMethod: boolean; // ¿cae dentro del rango pedido usando date_order?
 }
 
 export interface ReconciliationTotalsDoc {
@@ -78,9 +79,9 @@ export interface ReconciliationTotalsDoc {
 export interface ReconciliationStoreDoc {
   posConfigId: number;
   storeName: string;
-  bySessionMethod: ReconciliationTotalsDoc; // lo que muestra hoy el resto de la app
-  byOrderDateMethod: ReconciliationTotalsDoc; // alternativa: agrupando por date_order
-  orderCountDifference: number; // bySessionMethod.orderCount - byOrderDateMethod.orderCount
+  byStoreDayMethod: ReconciliationTotalsDoc; // lo que muestra hoy el resto de la app
+  bySessionMethod: ReconciliationTotalsDoc; // el método anterior, para comparar
+  orderCountDifference: number; // byStoreDayMethod.orderCount - bySessionMethod.orderCount
   // Conteo por state (incluye 'cancel') de todas las órdenes tocadas por
   // el rango bajo cualquiera de los 2 métodos — para ver de un vistazo
   // cuántas canceladas hay de por medio.

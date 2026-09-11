@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { OdooMany2One, OdooSearchReadOptions } from '../../odoo/types/odoo-common.types.js';
+import { OdooPosOrder } from '../../odoo/types/odoo-entities.types.js';
+import {
+  enumerateDates,
+  shiftDate,
+  storeDayRangeToUtc,
+  toStoreDate,
+} from '../../common/utils/store-date.util.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
@@ -18,10 +25,9 @@ import {
 
 // Tamaño de página para las consultas internas que necesitan "todo lo que
 // matchea" (no son la lista paginada que ve el frontend, sino datos
-// intermedios para agregar: sesiones del rango, órdenes de esas sesiones,
-// líneas de esas órdenes). fetchAllPages() pagina de verdad con offset
-// hasta traer todo, así que esto es solo el tamaño de cada viaje a Odoo,
-// no un tope de resultados.
+// intermedios para agregar: órdenes del rango, líneas de esas órdenes).
+// fetchAllPages() pagina de verdad con offset hasta traer todo, así que
+// esto es solo el tamaño de cada viaje a Odoo, no un tope de resultados.
 const INTERNAL_PAGE_SIZE = 1000;
 
 // Tope de seguridad para que un bug de paginación (o un volumen de datos
@@ -31,38 +37,20 @@ const INTERNAL_PAGE_SIZE = 1000;
 // qué hay tantos registros, no solo subir el número.
 const INTERNAL_FETCH_HARD_CAP = 50_000;
 
+// Órdenes canceladas: no se vendió nada en ellas, no cuentan como venta.
+const CANCELLED_STATE = 'cancel';
+
+// Margen a cada lado del rango que usa solo /sales/reconciliation, para
+// alcanzar las órdenes que quedan dentro del rango por un método y fuera
+// por el otro. Son 2 días (no 1) porque una sesión puede quedarse abierta
+// más de 24 horas — pasó de verdad: la sesión POS/01268 de Tienda Ramblas
+// abrió el 2026-09-06 y no cerró hasta el 2026-09-08.
+const RECONCILIATION_MARGIN_DAYS = 2;
+
+const UNKNOWN_REF: RefDoc = { id: -1, name: 'Desconocido' };
+
 function many2OneToRef(value: OdooMany2One): RefDoc | null {
   return value ? { id: value[0], name: value[1] } : null;
-}
-
-// "2026-09-02 01:00:19" -> "2026-09-02". start_at es la fecha de SESIÓN por
-// la que agrupamos todo (ver CLAUDE.md / decisión confirmada con el
-// usuario) — nunca la fecha de la orden individual.
-function toDateOnly(value: string): string {
-  return value.slice(0, 10);
-}
-
-// Suma (o resta, con `days` negativo) días a una fecha YYYY-MM-DD.
-function shiftDate(date: string, days: number): string {
-  const cursor = new Date(`${date}T00:00:00Z`);
-  cursor.setUTCDate(cursor.getUTCDate() + days);
-  return cursor.toISOString().slice(0, 10);
-}
-
-function enumerateDates(dateFrom: string, dateTo: string): string[] {
-  const dates: string[] = [];
-  const cursor = new Date(`${dateFrom}T00:00:00Z`);
-  const end = new Date(`${dateTo}T00:00:00Z`);
-  while (cursor.getTime() <= end.getTime()) {
-    dates.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return dates;
-}
-
-interface ResolvedSessions {
-  sessionIds: number[];
-  sessionRefById: Map<number, { session: RefDoc; posConfig: RefDoc; date: string }>;
 }
 
 @Injectable()
@@ -100,83 +88,70 @@ export class SalesService {
     return all;
   }
 
-  // Agrupamos por fecha de SESIÓN (no de orden): se resuelven primero las
-  // pos.session dentro del rango + tienda, y desde ahí se sabe qué
-  // órdenes pertenecen a cuál sesión/tienda/día.
-  private async resolveSessions(
+  // Domain de pos.order para un rango de DÍAS LOCALES de la tienda.
+  //
+  // Una orden pertenece al día en que se cobró en hora local (igual que en
+  // los reportes propios de Odoo), no al día en que abrió la sesión POS:
+  // las tiendas no siempre cierran caja cada noche, y una sesión que se
+  // queda abierta 40 horas dejaría días enteros en cero. Como Odoo guarda
+  // date_order en UTC, el rango local se traduce a la ventana UTC que lo
+  // cubre (ver store-date.util.ts).
+  private buildOrdersDomain(
     dateFrom: string,
     dateTo: string,
     posConfigId?: number,
-  ): Promise<ResolvedSessions> {
+    options: { excludeCancelled?: boolean } = {},
+  ): unknown[] {
+    const { utcFrom, utcTo } = storeDayRangeToUtc(dateFrom, dateTo);
     const domain: unknown[] = [
-      ['start_at', '>=', `${dateFrom} 00:00:00`],
-      ['start_at', '<=', `${dateTo} 23:59:59`],
+      ['date_order', '>=', utcFrom],
+      ['date_order', '<=', utcTo],
     ];
     if (posConfigId) {
       domain.push(['config_id', '=', posConfigId]);
     }
-
-    const sessions = await this.fetchAllPages(
-      (options) => this.odooService.findPosSessions(options),
-      domain,
-      'resolveSessions',
-    );
-
-    const sessionRefById = new Map<number, { session: RefDoc; posConfig: RefDoc; date: string }>();
-    for (const session of sessions) {
-      const posConfig = many2OneToRef(session.config_id);
-      if (!posConfig || !session.start_at) continue; // no debería pasar, ambos son obligatorios en Odoo
-      sessionRefById.set(session.id, {
-        session: { id: session.id, name: session.name },
-        posConfig,
-        date: toDateOnly(session.start_at),
-      });
+    if (options.excludeCancelled) {
+      domain.push(['state', '!=', CANCELLED_STATE]);
     }
+    return domain;
+  }
 
-    return { sessionIds: [...sessionRefById.keys()], sessionRefById };
+  private toSalesOrderDoc(order: OdooPosOrder): SalesOrderDoc {
+    return {
+      id: order.id,
+      name: order.name,
+      dateOrder: order.date_order,
+      date: toStoreDate(order.date_order),
+      state: order.state,
+      amountTotal: order.amount_total,
+      amountTax: order.amount_tax,
+      amountPaid: order.amount_paid,
+      amountReturn: order.amount_return,
+      partner: many2OneToRef(order.partner_id),
+      // Ambos son obligatorios en Odoo; el fallback es solo para que una
+      // respuesta inesperada no tire el endpoint entero.
+      posConfig: many2OneToRef(order.config_id) ?? UNKNOWN_REF,
+      session: many2OneToRef(order.session_id) ?? UNKNOWN_REF,
+    };
   }
 
   async findOrders(query: FindOrdersQueryDto): Promise<PaginatedOrdersDoc> {
     const dateTo = query.dateTo ?? query.dateFrom;
-    const { sessionIds, sessionRefById } = await this.resolveSessions(
-      query.dateFrom,
-      dateTo,
-      query.posConfigId,
-    );
-
-    if (sessionIds.length === 0) {
-      return { items: [], meta: { total: 0, page: query.page, limit: query.limit, totalPages: 0 } };
-    }
-
-    const domain = [['session_id', 'in', sessionIds]];
+    const domain = this.buildOrdersDomain(query.dateFrom, dateTo, query.posConfigId);
     const offset = (query.page - 1) * query.limit;
 
     const [total, orders] = await Promise.all([
       this.odooService.countPosOrders(domain),
-      this.odooService.findPosOrders({ domain, limit: query.limit, offset, order: 'date_order desc' }),
+      this.odooService.findPosOrders({
+        domain,
+        limit: query.limit,
+        offset,
+        order: 'date_order desc',
+      }),
     ]);
 
-    const items: SalesOrderDoc[] = orders.map((order) => {
-      const refs = sessionRefById.get(order.session_id ? order.session_id[0] : -1);
-      return {
-        id: order.id,
-        name: order.name,
-        dateOrder: order.date_order,
-        state: order.state,
-        amountTotal: order.amount_total,
-        amountTax: order.amount_tax,
-        amountPaid: order.amount_paid,
-        amountReturn: order.amount_return,
-        partner: many2OneToRef(order.partner_id),
-        // refs siempre debería existir (la orden vino de esta misma
-        // sesión), pero por si Odoo devuelve algo inesperado no truena.
-        posConfig: refs?.posConfig ?? { id: -1, name: 'Desconocido' },
-        session: refs?.session ?? { id: -1, name: 'Desconocido' },
-      };
-    });
-
     return {
-      items,
+      items: orders.map((order) => this.toSalesOrderDoc(order)),
       meta: {
         total,
         page: query.page,
@@ -188,18 +163,11 @@ export class SalesService {
 
   async findTopProducts(query: FindTopProductsQueryDto): Promise<TopProductDoc[]> {
     const dateTo = query.dateTo ?? query.dateFrom;
-    const { sessionIds } = await this.resolveSessions(query.dateFrom, dateTo, query.posConfigId);
-    if (sessionIds.length === 0) {
-      return [];
-    }
-
-    // Se excluyen las órdenes canceladas: no se "vendió" nada en ellas.
     const orders = await this.fetchAllPages(
       (options) => this.odooService.findPosOrders(options),
-      [
-        ['session_id', 'in', sessionIds],
-        ['state', '!=', 'cancel'],
-      ],
+      this.buildOrdersDomain(query.dateFrom, dateTo, query.posConfigId, {
+        excludeCancelled: true,
+      }),
       'findTopProducts (órdenes)',
     );
     if (orders.length === 0) {
@@ -231,48 +199,40 @@ export class SalesService {
       }
     }
 
-    const direction = query.order === "asc" ? 1 : -1;
+    const direction = query.order === 'asc' ? 1 : -1;
     return [...totalsByProduct.values()]
       .sort((a, b) => direction * (a.totalQuantity - b.totalQuantity))
       .slice(0, query.limit);
   }
 
-  // Ventas agregadas por día (fecha de SESIÓN) — para la gráfica de
+  // Ventas agregadas por día local de la tienda — para la gráfica de
   // tendencia del dashboard. Rellena con ceros los días del rango que no
-  // tuvieron ninguna sesión/orden, para que la gráfica no tenga huecos.
+  // tuvieron ninguna venta, para que la gráfica no tenga huecos.
   async findDailySummary(query: FindDailySummaryQueryDto): Promise<DailySalesDoc[]> {
     const dateTo = query.dateTo ?? query.dateFrom;
-    const { sessionIds, sessionRefById } = await this.resolveSessions(
-      query.dateFrom,
-      dateTo,
-      query.posConfigId,
-    );
 
-    const totalsByDate = new Map<string, { orderCount: number; totalRevenue: number; totalTax: number }>();
+    const totalsByDate = new Map<
+      string,
+      { orderCount: number; totalRevenue: number; totalTax: number }
+    >();
     for (const date of enumerateDates(query.dateFrom, dateTo)) {
       totalsByDate.set(date, { orderCount: 0, totalRevenue: 0, totalTax: 0 });
     }
 
-    if (sessionIds.length > 0) {
-      const orders = await this.fetchAllPages(
-        (options) => this.odooService.findPosOrders(options),
-        [
-          ['session_id', 'in', sessionIds],
-          ['state', '!=', 'cancel'],
-        ],
-        'findDailySummary',
-      );
+    const orders = await this.fetchAllPages(
+      (options) => this.odooService.findPosOrders(options),
+      this.buildOrdersDomain(query.dateFrom, dateTo, query.posConfigId, {
+        excludeCancelled: true,
+      }),
+      'findDailySummary',
+    );
 
-      for (const order of orders) {
-        const sessionId = order.session_id ? order.session_id[0] : undefined;
-        const date = sessionId ? sessionRefById.get(sessionId)?.date : undefined;
-        if (!date) continue;
-        const bucket = totalsByDate.get(date);
-        if (!bucket) continue; // no debería pasar: viene de una sesión ya filtrada por el mismo rango
-        bucket.orderCount += 1;
-        bucket.totalRevenue += order.amount_total;
-        bucket.totalTax += order.amount_tax;
-      }
+    for (const order of orders) {
+      const bucket = totalsByDate.get(toStoreDate(order.date_order));
+      if (!bucket) continue; // no debería pasar: el domain ya filtró por el mismo rango
+      bucket.orderCount += 1;
+      bucket.totalRevenue += order.amount_total;
+      bucket.totalTax += order.amount_tax;
     }
 
     return [...totalsByDate.entries()]
@@ -289,36 +249,83 @@ export class SalesService {
     return configs.map((config) => ({ id: config.id, name: config.name }));
   }
 
-  // Reporte de diagnóstico: compara, para cada tienda, cuántas órdenes
-  // (y cuánta venta) da el rango pedido según los 2 métodos posibles de
-  // "a qué día pertenece una orden" — por fecha de SESIÓN (start_at, lo
-  // que usa el resto de la app) vs. por date_order (la fecha/hora propia
-  // de la orden individual). Surgió al investigar por qué "Tráfico de
-  // tiendas" no siempre cuadra 1:1 contra un conteo manual (ej. un
-  // Excel): las tiendas que cierran después de medianoche tienen
-  // órdenes cuyo date_order cae al día siguiente aunque pertenezcan a la
-  // sesión del día anterior — un conteo manual que no distinguió entre
-  // ambos métodos puede terminar corriendo esas órdenes de un día a
-  // otro. Este endpoint no cambia cómo cuenta el resto de la app (la
-  // fecha de sesión sigue siendo la oficial) — es una herramienta de
-  // reconciliación para diagnosticar diferencias puntuales.
+  // Sesiones del rango indexadas por id, con la fecha (UTC) en que
+  // abrieron. Solo la usa /sales/reconciliation, para poder reproducir el
+  // método de agrupación ANTERIOR (por fecha de sesión) y compararlo
+  // contra el actual.
+  private async findSessionDates(
+    dateFrom: string,
+    dateTo: string,
+    posConfigId?: number,
+  ): Promise<Map<number, string>> {
+    const domain: unknown[] = [
+      ['start_at', '>=', `${dateFrom} 00:00:00`],
+      ['start_at', '<=', `${dateTo} 23:59:59`],
+    ];
+    if (posConfigId) {
+      domain.push(['config_id', '=', posConfigId]);
+    }
+
+    const sessions = await this.fetchAllPages(
+      (options) => this.odooService.findPosSessions(options),
+      domain,
+      'findSessionDates',
+    );
+
+    return new Map(
+      sessions
+        .filter((session) => session.start_at)
+        .map((session) => [session.id, (session.start_at as string).slice(0, 10)]),
+    );
+  }
+
+  // Reporte de diagnóstico: compara, para cada tienda, cuántas órdenes (y
+  // cuánta venta) da el rango pedido según los 2 métodos de "a qué día
+  // pertenece una orden":
+  //
+  //   - byStoreDayMethod — día LOCAL de date_order. Es el método oficial
+  //     de la app desde el fix de septiembre 2026, y el que usan los
+  //     propios reportes de Odoo.
+  //   - bySessionMethod — fecha (UTC) en que abrió la sesión POS. Era el
+  //     método anterior; se mantiene aquí solo para poder explicar por qué
+  //     un número histórico cambió.
+  //
+  // Sigue siendo una herramienta de diagnóstico para cuadrar contra un
+  // conteo externo (ej. un Excel), no un módulo del dashboard.
   async getReconciliation(query: FindReconciliationQueryDto): Promise<ReconciliationStoreDoc[]> {
     const dateFrom = query.dateFrom;
     const dateTo = query.dateTo ?? query.dateFrom;
+    const wideFrom = shiftDate(dateFrom, -RECONCILIATION_MARGIN_DAYS);
+    const wideTo = shiftDate(dateTo, RECONCILIATION_MARGIN_DAYS);
 
-    // Se trae una ventana 1 día más ancha a cada lado: una orden puede
-    // caer dentro del rango pedido por date_order aunque su sesión haya
-    // empezado el día anterior (o viceversa), y esas son justo las que
-    // hay que detectar.
-    const wideFrom = shiftDate(dateFrom, -1);
-    const wideTo = shiftDate(dateTo, 1);
+    const sessionDateById = await this.findSessionDates(wideFrom, wideTo, query.posConfigId);
 
-    const { sessionIds, sessionRefById } = await this.resolveSessions(wideFrom, wideTo, query.posConfigId);
+    // Dos barridos, porque los 2 métodos alcanzan conjuntos distintos: una
+    // orden puede entrar por su día local aunque su sesión haya abierto
+    // fuera de la ventana, o al revés. Se unen por id para no contar doble.
+    const [byDate, bySession] = await Promise.all([
+      this.fetchAllPages(
+        (options) => this.odooService.findPosOrders(options),
+        this.buildOrdersDomain(wideFrom, wideTo, query.posConfigId),
+        'getReconciliation (por día local)',
+      ),
+      sessionDateById.size === 0
+        ? Promise.resolve([])
+        : this.fetchAllPages(
+            (options) => this.odooService.findPosOrders(options),
+            [['session_id', 'in', [...sessionDateById.keys()]]],
+            'getReconciliation (por sesión)',
+          ),
+    ]);
+    const ordersById = new Map<number, OdooPosOrder>();
+    for (const order of [...byDate, ...bySession]) {
+      ordersById.set(order.id, order);
+    }
 
     // Se trae SIEMPRE la lista completa de tiendas (para tener el nombre
-    // real), aunque después se filtre a una sola si vino posConfigId —
-    // así el reporte no muestra el nombre vacío cuando se pide una
-    // tienda puntual.
+    // real), aunque después se filtre a una sola si vino posConfigId — así
+    // el reporte no muestra el nombre vacío cuando se pide una tienda
+    // puntual.
     const allStores = await this.findStores();
     const stores = query.posConfigId
       ? allStores.filter((store) => store.id === query.posConfigId)
@@ -332,8 +339,8 @@ export class SalesService {
         entry = {
           posConfigId,
           storeName,
+          byStoreDayMethod: { orderCount: 0, totalRevenue: 0 },
           bySessionMethod: { orderCount: 0, totalRevenue: 0 },
-          byOrderDateMethod: { orderCount: 0, totalRevenue: 0 },
           orderCountDifference: 0,
           stateBreakdown: {},
           boundaryOrders: [],
@@ -343,56 +350,50 @@ export class SalesService {
       return entry;
     }
 
-    if (sessionIds.length > 0) {
-      const orders = await this.fetchAllPages(
-        (options) => this.odooService.findPosOrders(options),
-        [['session_id', 'in', sessionIds]],
-        'getReconciliation',
-      );
+    for (const order of ordersById.values()) {
+      const posConfig = many2OneToRef(order.config_id);
+      if (!posConfig) continue;
+      if (query.posConfigId && posConfig.id !== query.posConfigId) continue;
 
-      for (const order of orders) {
-        const sessionId = order.session_id ? order.session_id[0] : undefined;
-        const refs = sessionId ? sessionRefById.get(sessionId) : undefined;
-        if (!refs) continue;
+      const storeDate = toStoreDate(order.date_order);
+      const sessionId = order.session_id ? order.session_id[0] : undefined;
+      const sessionDate = sessionId ? sessionDateById.get(sessionId) : undefined;
 
-        const posConfigId = refs.posConfig.id;
-        const storeName = storeNameById.get(posConfigId) ?? refs.posConfig.name;
-        const sessionDate = refs.date;
-        const orderDate = toDateOnly(order.date_order);
+      const inStoreDayRange = storeDate >= dateFrom && storeDate <= dateTo;
+      // Sin sessionDate la sesión abrió fuera de la ventana ampliada, así
+      // que con el método anterior esta orden tampoco caía en el rango.
+      const inSessionRange = !!sessionDate && sessionDate >= dateFrom && sessionDate <= dateTo;
+      // Fuera de los dos: la orden solo aparece por el margen de la
+      // ventana ampliada, no aporta nada a este reporte.
+      if (!inStoreDayRange && !inSessionRange) continue;
 
-        const inSessionRange = sessionDate >= dateFrom && sessionDate <= dateTo;
-        const inOrderDateRange = orderDate >= dateFrom && orderDate <= dateTo;
-        // Fuera de los dos rangos: la orden solo aparece por el margen
-        // de 1 día de la ventana ampliada, no aporta nada a este reporte.
-        if (!inSessionRange && !inOrderDateRange) continue;
+      const entry = getOrInit(posConfig.id, storeNameById.get(posConfig.id) ?? posConfig.name);
 
-        const entry = getOrInit(posConfigId, storeName);
+      entry.stateBreakdown[order.state] = (entry.stateBreakdown[order.state] ?? 0) + 1;
 
-        entry.stateBreakdown[order.state] = (entry.stateBreakdown[order.state] ?? 0) + 1;
+      const countsAsSale = order.state !== CANCELLED_STATE;
+      if (inStoreDayRange && countsAsSale) {
+        entry.byStoreDayMethod.orderCount += 1;
+        entry.byStoreDayMethod.totalRevenue += order.amount_total;
+      }
+      if (inSessionRange && countsAsSale) {
+        entry.bySessionMethod.orderCount += 1;
+        entry.bySessionMethod.totalRevenue += order.amount_total;
+      }
 
-        const countsAsSale = order.state !== 'cancel';
-        if (inSessionRange && countsAsSale) {
-          entry.bySessionMethod.orderCount += 1;
-          entry.bySessionMethod.totalRevenue += order.amount_total;
-        }
-        if (inOrderDateRange && countsAsSale) {
-          entry.byOrderDateMethod.orderCount += 1;
-          entry.byOrderDateMethod.totalRevenue += order.amount_total;
-        }
-
-        if (inSessionRange !== inOrderDateRange) {
-          const boundaryOrder: ReconciliationOrderDoc = {
-            id: order.id,
-            name: order.name,
-            state: order.state,
-            dateOrder: order.date_order,
-            sessionDate,
-            amountTotal: order.amount_total,
-            includedBySessionMethod: inSessionRange,
-            includedByOrderDateMethod: inOrderDateRange,
-          };
-          entry.boundaryOrders.push(boundaryOrder);
-        }
+      if (inStoreDayRange !== inSessionRange) {
+        const boundaryOrder: ReconciliationOrderDoc = {
+          id: order.id,
+          name: order.name,
+          state: order.state,
+          dateOrder: order.date_order,
+          storeDate,
+          sessionDate: sessionDate ?? null,
+          amountTotal: order.amount_total,
+          includedByStoreDayMethod: inStoreDayRange,
+          includedBySessionMethod: inSessionRange,
+        };
+        entry.boundaryOrders.push(boundaryOrder);
       }
     }
 
@@ -405,7 +406,8 @@ export class SalesService {
     return [...resultByStore.values()]
       .map((entry) => ({
         ...entry,
-        orderCountDifference: entry.bySessionMethod.orderCount - entry.byOrderDateMethod.orderCount,
+        orderCountDifference:
+          entry.byStoreDayMethod.orderCount - entry.bySessionMethod.orderCount,
         boundaryOrders: entry.boundaryOrders.sort((a, b) => (a.dateOrder < b.dateOrder ? -1 : 1)),
       }))
       .sort((a, b) => a.storeName.localeCompare(b.storeName));

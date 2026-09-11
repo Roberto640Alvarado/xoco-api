@@ -19,9 +19,10 @@ export class SalesController {
 
   @Get('orders')
   @ApiOperation({
-    summary: 'Órdenes por rango de fecha (de sesión) y tienda, paginado',
+    summary: 'Órdenes por rango de fecha y tienda, paginado',
     description:
-      'Agrupa por fecha de la sesión POS (start_at). Sin posConfigId trae todas las tiendas mezcladas en una sola lista.',
+      'Agrupa por el día LOCAL de la tienda en que se cobró la orden (date_order convertido de UTC), igual que los ' +
+      'reportes propios de Odoo. Sin posConfigId trae todas las tiendas mezcladas en una sola lista.',
   })
   findOrders(@Query() query: FindOrdersQueryDto) {
     return this.salesService.findOrders(query);
@@ -39,7 +40,7 @@ export class SalesController {
 
   @Get('daily-summary')
   @ApiOperation({
-    summary: 'Ventas agregadas por día (fecha de sesión) — para la gráfica de tendencia',
+    summary: 'Ventas agregadas por día local de la tienda — para la gráfica de tendencia',
     description:
       'Un punto por cada día del rango (incluye días en cero, sin huecos). Excluye órdenes canceladas.',
   })
@@ -55,14 +56,13 @@ export class SalesController {
 
   @Get('reconciliation')
   @ApiOperation({
-    summary: 'Diagnóstico: compara el conteo por fecha de sesión vs. por fecha de orden individual',
+    summary: 'Diagnóstico: compara el conteo por día local de la tienda vs. por fecha de sesión',
     description:
-      'Para cada tienda en el rango pedido, devuelve el total de órdenes/venta según los 2 métodos posibles de ' +
-      'agrupar por día (fecha de SESIÓN — el que usa el resto de la app — vs. fecha de la orden individual), la ' +
-      'diferencia entre ambos, un desglose por estado, y la lista puntual de órdenes donde los 2 métodos no ' +
-      'coinciden (las que caen justo en el borde de medianoche). Pensado para explicar diferencias contra un ' +
-      'conteo externo (ej. un Excel) sin tener que investigar caso por caso — no cambia cómo cuenta el resto de ' +
-      'la app.',
+      'Para cada tienda en el rango pedido, devuelve el total de órdenes/venta según los 2 métodos de agrupar por ' +
+      'día (día LOCAL de date_order — el que usa el resto de la app — vs. fecha en que abrió la SESIÓN POS, que ' +
+      'era el método anterior), la diferencia entre ambos, un desglose por estado, y la lista puntual de órdenes ' +
+      'donde los 2 métodos no coinciden. Pensado para explicar diferencias contra un conteo externo (ej. un ' +
+      'Excel) o contra un número histórico del panel — no cambia cómo cuenta el resto de la app.',
   })
   getReconciliation(@Query() query: FindReconciliationQueryDto) {
     return this.salesService.getReconciliation(query);

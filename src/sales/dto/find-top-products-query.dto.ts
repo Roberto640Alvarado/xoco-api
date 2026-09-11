@@ -5,7 +5,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 export type ProductRankOrder = 'desc' | 'asc';
 
 export class FindTopProductsQueryDto {
-  @ApiPropertyOptional({ example: '2026-09-01', description: 'Fecha inicial (incluida), formato YYYY-MM-DD. Filtra por la fecha de la SESIÓN POS.' })
+  @ApiPropertyOptional({ example: '2026-09-01', description: 'Fecha inicial (incluida), formato YYYY-MM-DD. Filtra por el día LOCAL de la tienda en que se cobró la orden.' })
   @IsDateString()
   dateFrom!: string;
 
