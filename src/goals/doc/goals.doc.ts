@@ -7,6 +7,7 @@ export interface StoreGoalDoc {
   month: number;
   growthPercent: number;
   updatedAt: Date;
+  updatedByEmail: string | null;
 }
 
 // Fila de la tabla "Tráfico de tiendas" (meta vs. real vs. proyección),
@@ -55,4 +56,6 @@ export interface GoalSummaryItemDoc {
   daysInMonth: number;
   projectedOrders: number;
   projectedReachPercent: number | null;
+  updatedAt: Date | null;
+  updatedByEmail: string | null;
 }

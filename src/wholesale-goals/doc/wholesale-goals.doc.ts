@@ -7,6 +7,7 @@ export interface WholesaleClientGoalDoc {
   month: number;
   growthPercent: number;
   updatedAt: Date;
+  updatedByEmail: string | null;
 }
 
 // Fila de la tabla de "Ventas Mayoreo" (meta $ vs. real $), para un
@@ -32,4 +33,6 @@ export interface WholesaleGoalSummaryItemDoc {
   reachPercent: number | null;
   pendingValue: number | null;
   isCurrentMonth: boolean;
+  updatedAt: Date | null;
+  updatedByEmail: string | null;
 }

@@ -2,6 +2,8 @@ import { Body, Controller, Get, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '../../generated/prisma/index.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
+import { User } from '../../common/decorators/user.decorator.js';
+import { RequiresModule } from '../../common/decorators/requires-module.decorator.js';
 import { WHOLESALE_CLIENTS } from '../../sales/constants/wholesale-clients.const.js';
 import { WholesaleGoalsService } from '../services/wholesale-goals.service.js';
 import { UpsertWholesaleGoalsBulkDto } from '../dto/upsert-wholesale-goals-bulk.dto.js';
@@ -17,6 +19,7 @@ import { FindWholesaleGoalsSummaryQueryDto } from '../dto/find-wholesale-goals-s
 export class WholesaleGoalsController {
   constructor(private readonly wholesaleGoalsService: WholesaleGoalsService) {}
 
+  @RequiresModule('dashboard.ventas-mayoreo')
   @Get('clients')
   @ApiOperation({
     summary: 'Clientes de mayoreo trackeados (Selectos, Operadora del Sur) — para el filtro/modal del panel',
@@ -26,6 +29,7 @@ export class WholesaleGoalsController {
     return WHOLESALE_CLIENTS.map((client) => ({ key: client.key, label: client.label }));
   }
 
+  @RequiresModule('dashboard.ventas-mayoreo')
   @Get('summary')
   @ApiOperation({
     summary:
@@ -38,11 +42,12 @@ export class WholesaleGoalsController {
     return this.wholesaleGoalsService.getSummary(query);
   }
 
+  @RequiresModule('dashboard.ventas-mayoreo')
   @Put()
   @ApiOperation({
     summary: 'Registra o actualiza el % de crecimiento de venta ($) de uno o varios clientes de mayoreo para un mes (lote).',
   })
-  upsertBulk(@Body() dto: UpsertWholesaleGoalsBulkDto) {
-    return this.wholesaleGoalsService.upsertBulk(dto);
+  upsertBulk(@Body() dto: UpsertWholesaleGoalsBulkDto, @User('email') updatedByEmail: string) {
+    return this.wholesaleGoalsService.upsertBulk(dto, updatedByEmail);
   }
 }

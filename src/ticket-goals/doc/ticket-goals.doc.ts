@@ -7,6 +7,7 @@ export interface StoreTicketGoalDoc {
   month: number;
   growthPercent: number;
   updatedAt: Date;
+  updatedByEmail: string | null;
 }
 
 // Fila de la tabla "Ticket Promedio" (ticket real vs. meta), para una
@@ -37,4 +38,6 @@ export interface TicketGoalSummaryItemDoc {
   difference: number | null;
   reachPercent: number | null;
   isCurrentMonth: boolean;
+  updatedAt: Date | null;
+  updatedByEmail: string | null;
 }

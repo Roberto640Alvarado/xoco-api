@@ -49,13 +49,14 @@ export class SalesGoalsService {
     private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
   ) {}
 
-  async upsertBulk(dto: UpsertSalesGoalsBulkDto): Promise<StoreSalesGoalDoc[]> {
+  async upsertBulk(dto: UpsertSalesGoalsBulkDto, updatedByEmail: string): Promise<StoreSalesGoalDoc[]> {
     const goals = await this.salesGoalsRepository.upsertMany(
       dto.entries.map((entry) => ({
         posConfigId: entry.posConfigId,
         year: dto.year,
         month: dto.month,
         growthPercent: entry.growthPercent,
+        updatedByEmail,
       })),
     );
 
@@ -66,6 +67,7 @@ export class SalesGoalsService {
       month: goal.month,
       growthPercent: goal.growthPercent,
       updatedAt: goal.updatedAt,
+      updatedByEmail: goal.updatedByEmail,
     }));
   }
 
@@ -181,8 +183,10 @@ export class SalesGoalsService {
 
     const allGoals = await this.salesGoalsRepository.findManyForStores(posConfigIds);
     const growthByKey = new Map<string, number>();
+    const auditByKey = new Map<string, { updatedAt: Date; updatedByEmail: string | null }>();
     for (const goal of allGoals) {
       growthByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), goal.growthPercent);
+      auditByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), { updatedAt: goal.updatedAt, updatedByEmail: goal.updatedByEmail });
     }
 
     const actualRevenueCache = new Map<string, Promise<Map<number, number>>>();
@@ -213,6 +217,7 @@ export class SalesGoalsService {
         const reachPercent = targetRevenue ? actualRevenue / targetRevenue : null;
         const pendingValue = targetRevenue != null ? targetRevenue - actualRevenue : null;
 
+        const audit = auditByKey.get(goalKey(store.id, year, month)) ?? null;
         const item: SalesGoalSummaryItemDoc = {
           posConfigId: store.id,
           storeName: store.name,
@@ -224,6 +229,8 @@ export class SalesGoalsService {
           reachPercent,
           pendingValue,
           isCurrentMonth,
+          updatedAt: audit ? audit.updatedAt : null,
+          updatedByEmail: audit ? audit.updatedByEmail : null,
         };
         return item;
       }),

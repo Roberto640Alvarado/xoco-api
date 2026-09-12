@@ -7,12 +7,14 @@ interface CreateUserData {
   name: string | null;
   role: Role;
   hashedPassword: string;
+  posConfigId: number | null;
 }
 
 interface UpdateUserData {
   email: string;
   name: string | null;
   role: Role;
+  posConfigId: number | null;
 }
 
 // Único acceso a datos permitido a la colección users — el resto de la
@@ -40,6 +42,7 @@ export class UsersRepository {
         name: data.name,
         role: data.role,
         password: data.hashedPassword,
+        posConfigId: data.posConfigId,
       },
     });
   }

@@ -7,6 +7,7 @@ export interface StoreSalesGoalDoc {
   month: number;
   growthPercent: number;
   updatedAt: Date;
+  updatedByEmail: string | null;
 }
 
 // Fila de la tabla "Venta Mensual" (meta $ vs. real $), para una tienda y
@@ -33,4 +34,6 @@ export interface SalesGoalSummaryItemDoc {
   reachPercent: number | null;
   pendingValue: number | null;
   isCurrentMonth: boolean;
+  updatedAt: Date | null;
+  updatedByEmail: string | null;
 }

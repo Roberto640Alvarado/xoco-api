@@ -14,17 +14,23 @@ datasource db {
 enum Role {
   SUPER_ADMIN
   FINANZAS
+  VENDEDOR
 }
 
 model User {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  email     String   @unique
-  password  String
-  role      Role
-  name      String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  email       String   @unique
+  password    String
+  role        Role
+  name        String?
+  isActive    Boolean  @default(true)
+  // Tienda asignada — SOLO para role=VENDEDOR (ver comentario en
+  // scoped-pos-config-id.util.ts): un Vendedor únicamente ve datos de
+  // esta tienda, el servidor lo fuerza sin importar lo que mande el
+  // cliente. null para SUPER_ADMIN/FINANZAS.
+  posConfigId Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@map("users")
 }
@@ -65,6 +71,7 @@ model StoreGoal {
   growthPercent  Float
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  updatedByEmail String?
 
   @@unique([posConfigId, year, month])
   @@map("store_goals")
@@ -86,6 +93,7 @@ model StoreSalesGoal {
   growthPercent  Float
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  updatedByEmail String?
 
   @@unique([posConfigId, year, month])
   @@map("store_sales_goals")
@@ -104,6 +112,7 @@ model WholesaleClientGoal {
   growthPercent  Float
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  updatedByEmail String?
 
   @@unique([clientKey, year, month])
   @@map("wholesale_client_goals")
@@ -124,7 +133,30 @@ model StoreTicketGoal {
   growthPercent  Float
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  updatedByEmail String?
 
   @@unique([posConfigId, year, month])
   @@map("store_ticket_goals")
+}
+
+// Catálogo de módulos del dashboard cuyo acceso por rol es configurable
+// desde el panel "Permisos" (Fase 3 de RBAC — ver
+// src/common/constants/module-keys.const.ts para el catálogo de
+// moduleKey y el techo original de @Roles() por módulo). Sin un
+// documento para un (role, moduleKey) dado, el acceso se decide por
+// default-allow — este modelo SOLO puede angostar el techo ya fijo de
+// @Roles() en cada controlador, nunca ampliarlo (ver ModuleAccessGuard).
+// Administración queda deliberadamente fuera de este catálogo por
+// completo: no existe ningún moduleKey para /dashboard/admin/*, así
+// SUPER_ADMIN nunca puede perder ese acceso desde este mismo panel.
+model RoleModuleAccess {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  role           Role
+  moduleKey      String
+  enabled        Boolean
+  updatedAt      DateTime @updatedAt
+  updatedByEmail String?
+
+  @@unique([role, moduleKey])
+  @@map("role_module_access")
 }

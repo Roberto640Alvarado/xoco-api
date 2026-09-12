@@ -5,7 +5,7 @@ import { User } from '../../common/decorators/user.decorator.js';
 import { AuthService } from '../services/auth.service.js';
 import { LoginDto } from '../dto/login.dto.js';
 import { AuthResponseDoc } from '../doc/auth-response.doc.js';
-import { UserResponseDoc } from '../../users/doc/user-response.doc.js';
+import { AuthMeResponseDoc } from '../doc/auth-me-response.doc.js';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -25,9 +25,9 @@ export class AuthController {
   @Get('me')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Retorna la información del usuario dueño del token.' })
-  @ApiResponse({ status: 200, description: 'Información del usuario.', type: UserResponseDoc })
+  @ApiResponse({ status: 200, description: 'Información del usuario, incluyendo sus permisos efectivos por módulo.', type: AuthMeResponseDoc })
   @ApiResponse({ status: 401, description: 'Token inválido, expirado o no proporcionado.' })
-  getProfile(@User('id') userId: string): Promise<UserResponseDoc> {
+  getProfile(@User('id') userId: string): Promise<AuthMeResponseDoc> {
     return this.authService.getProfile(userId);
   }
 }

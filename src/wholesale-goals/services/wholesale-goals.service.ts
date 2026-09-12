@@ -46,13 +46,14 @@ export class WholesaleGoalsService {
     private readonly wholesaleClientTotalsService: WholesaleClientTotalsService,
   ) {}
 
-  async upsertBulk(dto: UpsertWholesaleGoalsBulkDto): Promise<WholesaleClientGoalDoc[]> {
+  async upsertBulk(dto: UpsertWholesaleGoalsBulkDto, updatedByEmail: string): Promise<WholesaleClientGoalDoc[]> {
     const goals = await this.wholesaleGoalsRepository.upsertMany(
       dto.entries.map((entry) => ({
         clientKey: entry.clientKey,
         year: dto.year,
         month: dto.month,
         growthPercent: entry.growthPercent,
+        updatedByEmail,
       })),
     );
 
@@ -63,6 +64,7 @@ export class WholesaleGoalsService {
       month: goal.month,
       growthPercent: goal.growthPercent,
       updatedAt: goal.updatedAt,
+      updatedByEmail: goal.updatedByEmail,
     }));
   }
 
@@ -175,8 +177,10 @@ export class WholesaleGoalsService {
     const clientKeys = WHOLESALE_CLIENTS.map((client) => client.key);
     const allGoals = await this.wholesaleGoalsRepository.findManyForClients(clientKeys);
     const growthByKey = new Map<string, number>();
+    const auditByKey = new Map<string, { updatedAt: Date; updatedByEmail: string | null }>();
     for (const goal of allGoals) {
       growthByKey.set(goalKey(goal.clientKey, goal.year, goal.month), goal.growthPercent);
+      auditByKey.set(goalKey(goal.clientKey, goal.year, goal.month), { updatedAt: goal.updatedAt, updatedByEmail: goal.updatedByEmail });
     }
 
     const actualRevenueCache = new Map<string, Promise<Map<string, number>>>();
@@ -207,6 +211,7 @@ export class WholesaleGoalsService {
         const reachPercent = targetRevenue ? actualRevenue / targetRevenue : null;
         const pendingValue = targetRevenue != null ? targetRevenue - actualRevenue : null;
 
+        const audit = auditByKey.get(goalKey(client.key, year, month)) ?? null;
         const item: WholesaleGoalSummaryItemDoc = {
           clientKey: client.key,
           clientLabel: client.label,
@@ -218,6 +223,8 @@ export class WholesaleGoalsService {
           reachPercent,
           pendingValue,
           isCurrentMonth,
+          updatedAt: audit ? audit.updatedAt : null,
+          updatedByEmail: audit ? audit.updatedByEmail : null,
         };
         return item;
       }),

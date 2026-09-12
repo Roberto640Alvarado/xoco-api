@@ -45,13 +45,14 @@ export class GoalsService {
     private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
   ) {}
 
-  async upsertBulk(dto: UpsertGoalsBulkDto): Promise<StoreGoalDoc[]> {
+  async upsertBulk(dto: UpsertGoalsBulkDto, updatedByEmail: string): Promise<StoreGoalDoc[]> {
     const goals = await this.goalsRepository.upsertMany(
       dto.entries.map((entry) => ({
         posConfigId: entry.posConfigId,
         year: dto.year,
         month: dto.month,
         growthPercent: entry.growthPercent,
+        updatedByEmail,
       })),
     );
 
@@ -62,6 +63,7 @@ export class GoalsService {
       month: goal.month,
       growthPercent: goal.growthPercent,
       updatedAt: goal.updatedAt,
+      updatedByEmail: goal.updatedByEmail,
     }));
   }
 
@@ -201,8 +203,10 @@ export class GoalsService {
     // cadena de metas puede necesitar mirar varios meses hacia atrás.
     const allGoals = await this.goalsRepository.findManyForStores(posConfigIds);
     const growthByKey = new Map<string, number>();
+    const auditByKey = new Map<string, { updatedAt: Date; updatedByEmail: string | null }>();
     for (const goal of allGoals) {
       growthByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), goal.growthPercent);
+      auditByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), { updatedAt: goal.updatedAt, updatedByEmail: goal.updatedByEmail });
     }
 
     // Caches compartidos entre tiendas para esta sola consulta: evitan
@@ -241,6 +245,7 @@ export class GoalsService {
             : Math.round((actualOrders / daysElapsed) * daysInMonth);
         const projectedReachPercent = targetOrders ? projectedOrders / targetOrders : null;
 
+        const audit = auditByKey.get(goalKey(store.id, year, month)) ?? null;
         const item: GoalSummaryItemDoc = {
           posConfigId: store.id,
           storeName: store.name,
@@ -258,6 +263,8 @@ export class GoalsService {
           daysInMonth,
           projectedOrders,
           projectedReachPercent,
+          updatedAt: audit ? audit.updatedAt : null,
+          updatedByEmail: audit ? audit.updatedByEmail : null,
         };
         return item;
       }),

@@ -11,8 +11,10 @@ import { GoalsModule } from './goals/goals.module.js';
 import { SalesGoalsModule } from './sales-goals/sales-goals.module.js';
 import { TicketGoalsModule } from './ticket-goals/ticket-goals.module.js';
 import { WholesaleGoalsModule } from './wholesale-goals/wholesale-goals.module.js';
+import { PermissionsModule } from './permissions/permissions.module.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { RolesGuard } from './common/guards/roles.guard.js';
+import { ModuleAccessGuard } from './common/guards/module-access.guard.js';
 
 // @nestjs/observe (tracing/logs/métricas hospedado) quedó deliberadamente
 // SIN configurar (decisión explícita: "Dejarlo por ahora, sin
@@ -28,14 +30,18 @@ import { RolesGuard } from './common/guards/roles.guard.js';
 // las credenciales reales (idealmente desde variables de entorno, no
 // hardcodeadas), y pasar `instrument: ObserveInstrument` en main.ts.
 @Module({
-  imports: [PrismaModule, UsersModule, AuthModule, OdooModule, SalesModule, GoalsModule, SalesGoalsModule, TicketGoalsModule, WholesaleGoalsModule],
+  imports: [PrismaModule, UsersModule, AuthModule, OdooModule, SalesModule, GoalsModule, SalesGoalsModule, TicketGoalsModule, WholesaleGoalsModule, PermissionsModule],
   controllers: [AppController],
   providers: [
     AppService,
-    // Orden importa: primero autenticación (JWT), luego autorización (rol).
-    // Endpoints marcados @Public() (ej. POST /auth/login) omiten ambos.
+    // Orden importa: primero autenticación (JWT), luego autorización por
+    // rol, y por último autorización por módulo (panel "Permisos", Fase 3)
+    // — ModuleAccessGuard solo puede angostar lo que RolesGuard ya
+    // permitió, nunca ampliarlo (ver comentario en ese guard). Endpoints
+    // marcados @Public() (ej. POST /auth/login) omiten los tres.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: ModuleAccessGuard },
   ],
 })
 export class AppModule {}

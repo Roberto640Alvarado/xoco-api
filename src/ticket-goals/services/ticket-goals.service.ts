@@ -50,13 +50,14 @@ export class TicketGoalsService {
     private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
   ) {}
 
-  async upsertBulk(dto: UpsertTicketGoalsBulkDto): Promise<StoreTicketGoalDoc[]> {
+  async upsertBulk(dto: UpsertTicketGoalsBulkDto, updatedByEmail: string): Promise<StoreTicketGoalDoc[]> {
     const goals = await this.ticketGoalsRepository.upsertMany(
       dto.entries.map((entry) => ({
         posConfigId: entry.posConfigId,
         year: dto.year,
         month: dto.month,
         growthPercent: entry.growthPercent,
+        updatedByEmail,
       })),
     );
 
@@ -67,6 +68,7 @@ export class TicketGoalsService {
       month: goal.month,
       growthPercent: goal.growthPercent,
       updatedAt: goal.updatedAt,
+      updatedByEmail: goal.updatedByEmail,
     }));
   }
 
@@ -190,8 +192,10 @@ export class TicketGoalsService {
 
     const allGoals = await this.ticketGoalsRepository.findManyForStores(posConfigIds);
     const growthByKey = new Map<string, number>();
+    const auditByKey = new Map<string, { updatedAt: Date; updatedByEmail: string | null }>();
     for (const goal of allGoals) {
       growthByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), goal.growthPercent);
+      auditByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), { updatedAt: goal.updatedAt, updatedByEmail: goal.updatedByEmail });
     }
 
     const actualTicketCache = new Map<string, Promise<Map<number, number>>>();
@@ -222,6 +226,7 @@ export class TicketGoalsService {
         const reachPercent = targetAverageTicket ? actualAverageTicket / targetAverageTicket : null;
         const difference = targetAverageTicket != null ? actualAverageTicket - targetAverageTicket : null;
 
+        const audit = auditByKey.get(goalKey(store.id, year, month)) ?? null;
         const item: TicketGoalSummaryItemDoc = {
           posConfigId: store.id,
           storeName: store.name,
@@ -233,6 +238,8 @@ export class TicketGoalsService {
           difference,
           reachPercent,
           isCurrentMonth,
+          updatedAt: audit ? audit.updatedAt : null,
+          updatedByEmail: audit ? audit.updatedByEmail : null,
         };
         return item;
       }),

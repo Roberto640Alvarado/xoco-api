@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { Role } from '../../generated/prisma/index.js';
+import { SalesService } from '../../sales/services/sales.service.js';
 import { UsersRepository } from '../repositories/users.repository.js';
 import { CreateUserDto } from '../dto/create-user.dto.js';
 import { SetUserPasswordDto } from '../dto/set-user-password.dto.js';
@@ -17,7 +19,30 @@ const BCRYPT_COST = 12;
  */
 @Injectable()
 export class UsersService {
-  constructor(private readonly usersRepository: UsersRepository) {}
+  constructor(
+    private readonly usersRepository: UsersRepository,
+    private readonly salesService: SalesService,
+  ) {}
+
+  // Valida que `posConfigId` sea una tienda activa real (ver
+  // SalesService.findStores, misma fuente que usa el resto de la app) —
+  // solo se llama cuando role=VENDEDOR. Nunca deja pasar un Vendedor sin
+  // tienda válida, y nunca deja `posConfigId` seteado para otro rol.
+  private async resolvePosConfigId(role: Role, posConfigId?: number): Promise<number | null> {
+    if (role !== Role.VENDEDOR) return null;
+
+    if (posConfigId == null) {
+      throw new BadRequestException('Debes asignar una tienda al crear un usuario Vendedor.');
+    }
+
+    const stores = await this.salesService.findStores();
+    const isValidStore = stores.some((store) => store.id === posConfigId);
+    if (!isValidStore) {
+      throw new BadRequestException('La tienda seleccionada no es válida.');
+    }
+
+    return posConfigId;
+  }
 
   findByEmail(email: string) {
     return this.usersRepository.findByEmail(email.toLowerCase().trim());
@@ -50,12 +75,14 @@ export class UsersService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_COST);
+    const posConfigId = await this.resolvePosConfigId(dto.role, dto.posConfigId);
 
     return this.usersRepository.create({
       email,
       name: dto.name?.trim() || null,
       role: dto.role,
       hashedPassword,
+      posConfigId,
     });
   }
 
@@ -116,10 +143,13 @@ export class UsersService {
       throw new ForbiddenException('No puedes cambiar tu propio rol.');
     }
 
+    const posConfigId = await this.resolvePosConfigId(dto.role, dto.posConfigId);
+
     return this.usersRepository.updateUser(targetUserId, {
       email,
       name: dto.name?.trim() || null,
       role: dto.role,
+      posConfigId,
     });
   }
 }

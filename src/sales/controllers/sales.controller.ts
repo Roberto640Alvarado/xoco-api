@@ -2,6 +2,10 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '../../generated/prisma/index.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
+import { User } from '../../common/decorators/user.decorator.js';
+import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
+import { scopedPosConfigId } from '../../common/utils/scoped-pos-config-id.util.js';
+import { RequiresModule } from '../../common/decorators/requires-module.decorator.js';
 import { SalesService } from '../services/sales.service.js';
 import { SalespersonSalesService } from '../services/salesperson-sales.service.js';
 import { StoreInvoiceTotalsService } from '../services/store-invoice-totals.service.js';
@@ -31,6 +35,7 @@ export class SalesController {
     private readonly customerSearchService: CustomerSearchService,
   ) {}
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
   @Get('orders')
   @ApiOperation({
     summary: 'Órdenes por rango de fecha y tienda, paginado',
@@ -38,10 +43,13 @@ export class SalesController {
       'Agrupa por el día LOCAL de la tienda en que se cobró la orden (date_order convertido de UTC), igual que los ' +
       'reportes propios de Odoo. Sin posConfigId trae todas las tiendas mezcladas en una sola lista.',
   })
-  findOrders(@Query() query: FindOrdersQueryDto) {
+  findOrders(@Query() query: FindOrdersQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findOrders(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  @RequiresModule('dashboard.productos')
   @Get('top-products')
   @ApiOperation({
     summary: 'Top N productos más vendidos (por unidades) en un rango de fecha, por tienda',
@@ -50,10 +58,13 @@ export class SalesController {
       '/sales/top-products-by-weight) — su `qty` viene en gramos, no en piezas, y no es comparable al resto del ' +
       'ranking. Sin posConfigId agrega todas las tiendas.',
   })
-  findTopProducts(@Query() query: FindTopProductsQueryDto) {
+  findTopProducts(@Query() query: FindTopProductsQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findTopProducts(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  @RequiresModule('dashboard.productos')
   @Get('top-products-by-weight')
   @ApiOperation({
     summary: 'Top N productos vendidos a granel (por Kg) en un rango de fecha, por tienda',
@@ -62,10 +73,13 @@ export class SalesController {
       '(ej. "Crocks" y similares) — se agregan y ordenan por kilogramos vendidos (ya convertido, sea cual sea la ' +
       'UoM nativa de la línea), no por unidades. Excluye órdenes canceladas.',
   })
-  findTopProductsByWeight(@Query() query: FindTopProductsQueryDto) {
+  findTopProductsByWeight(@Query() query: FindTopProductsQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findTopProductsByWeight(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  @RequiresModule('dashboard.productos')
   @Get('product-monthly-comparison')
   @ApiOperation({
     summary: 'Compara, por producto, unidades e ingreso del mes en curso contra el mes anterior completo',
@@ -75,10 +89,13 @@ export class SalesController {
       'juntos por producto. Mismo criterio de "producto" que /sales/top-products (excluye los que se venden a ' +
       'granel — ver /sales/top-products-by-weight).',
   })
-  findProductMonthlyComparison(@Query() query: FindProductMonthlyComparisonQueryDto) {
+  findProductMonthlyComparison(@Query() query: FindProductMonthlyComparisonQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findProductMonthlyComparison(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  @RequiresModule('dashboard.categorias')
   @Get('top-products-by-category')
   @ApiOperation({
     summary: 'Top N productos por ingresos DENTRO DE CADA CATEGORÍA (product.category de Odoo), en un rango de fecha, por tienda',
@@ -88,24 +105,44 @@ export class SalesController {
       'el ingreso es comparable entre un producto por pieza y uno por peso, así que conviven en el ranking de su ' +
       'categoría. Excluye órdenes canceladas. Sin posConfigId agrega todas las tiendas.',
   })
-  findTopProductsByCategory(@Query() query: FindTopProductsByCategoryQueryDto) {
+  findTopProductsByCategory(@Query() query: FindTopProductsByCategoryQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findTopProductsByCategory(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  @RequiresModule(
+    'dashboard.resumen',
+    'dashboard.visitas',
+    'dashboard.trafico-diario',
+    'dashboard.venta-diaria',
+    'dashboard.ticket-detallado',
+  )
   @Get('daily-summary')
   @ApiOperation({
     summary: 'Ventas agregadas por día local de la tienda — para la gráfica de tendencia',
     description:
       'Un punto por cada día del rango (incluye días en cero, sin huecos). Excluye órdenes canceladas.',
   })
-  findDailySummary(@Query() query: FindDailySummaryQueryDto) {
+  findDailySummary(@Query() query: FindDailySummaryQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findDailySummary(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
   @Get('stores')
-  @ApiOperation({ summary: 'Tiendas activas (pos.config) — para el filtro del dashboard' })
-  findStores() {
-    return this.salesService.findStores();
+  @ApiOperation({
+    summary: 'Tiendas activas (pos.config) — para el filtro del dashboard',
+    description:
+      'Para un Vendedor, devuelve únicamente su propia tienda (arreglo de 1) — nunca la lista completa, así el ' +
+      'mismo selector de tienda del resto de la app queda naturalmente bloqueado en la suya.',
+  })
+  async findStores(@User() user: AuthenticatedUser) {
+    const stores = await this.salesService.findStores();
+    if (user.role === Role.VENDEDOR) {
+      return stores.filter((store) => store.id === user.posConfigId);
+    }
+    return stores;
   }
 
   @Get('by-salesperson')
@@ -136,6 +173,7 @@ export class SalesController {
     return this.storeInvoiceTotalsService.findTotalsByStore(query);
   }
 
+  @RequiresModule('dashboard.ventas-mayoreo')
   @Get('by-wholesale-client')
   @ApiOperation({
     summary: 'Visitas y venta por CLIENTE DE MAYOREO (Selectos, Operadora del Sur), con desglose por comprador',
@@ -150,6 +188,7 @@ export class SalesController {
     return this.wholesaleClientTotalsService.findTotalsByClient(query);
   }
 
+  @RequiresModule('dashboard.buscar-compradores')
   @Get('customers/search')
   @ApiOperation({
     summary: 'Buscador general de clientes por nombre, con su venta total facturada en un rango de fechas',
@@ -163,6 +202,8 @@ export class SalesController {
     return this.customerSearchService.search(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  @RequiresModule('dashboard.efectivo-otros-medios')
   @Get('payment-methods')
   @ApiOperation({
     summary: 'Venta por método de pago (Efectivo vs. otros medios), por rango de fecha y tienda',
@@ -172,10 +213,12 @@ export class SalesController {
       'medio (tarjeta, transferencia, apps de delivery, cuenta de cliente). `methods` trae el desglose completo ' +
       'por método puntual. Excluye órdenes canceladas. Sin posConfigId agrega todas las tiendas.',
   })
-  findPaymentMethodsSummary(@Query() query: FindDailySummaryQueryDto) {
+  findPaymentMethodsSummary(@Query() query: FindDailySummaryQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findPaymentMethodsSummary(query);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
   @Get('reconciliation')
   @ApiOperation({
     summary: 'Diagnóstico: compara el conteo por día local de la tienda vs. por fecha de sesión',
@@ -186,7 +229,8 @@ export class SalesController {
       'donde los 2 métodos no coinciden. Pensado para explicar diferencias contra un conteo externo (ej. un ' +
       'Excel) o contra un número histórico del panel — no cambia cómo cuenta el resto de la app.',
   })
-  getReconciliation(@Query() query: FindReconciliationQueryDto) {
+  getReconciliation(@Query() query: FindReconciliationQueryDto, @User() user: AuthenticatedUser) {
+    query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.getReconciliation(query);
   }
 }

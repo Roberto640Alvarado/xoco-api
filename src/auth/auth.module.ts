@@ -5,10 +5,12 @@ import { AuthController } from './controllers/auth.controller.js';
 import { AuthService } from './services/auth.service.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 import { UsersModule } from '../users/users.module.js';
+import { PermissionsModule } from '../permissions/permissions.module.js';
 
 @Module({
   imports: [
     UsersModule,
+    PermissionsModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     // useFactory se evalúa al instanciar el módulo (durante el bootstrap de
     // Nest), no al importar el archivo — para ese momento, process.env.JWT_SECRET

@@ -25,6 +25,11 @@ export class UserResponseDoc {
   @ApiProperty()
   isActive: boolean;
 
+  // Tienda asignada — solo presente (no null) para role=VENDEDOR.
+  @Expose()
+  @ApiProperty({ required: false, nullable: true })
+  posConfigId: number | null;
+
   @Expose()
   @ApiProperty()
   createdAt: Date;

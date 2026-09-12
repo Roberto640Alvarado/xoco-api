@@ -6,6 +6,7 @@ export interface UpsertGoalData {
   year: number;
   month: number;
   growthPercent: number;
+  updatedByEmail: string;
 }
 
 // Único acceso a datos permitido a la colección store_goals — el resto de
@@ -36,7 +37,7 @@ export class GoalsRepository {
           month: data.month,
         },
       },
-      update: { growthPercent: data.growthPercent },
+      update: { growthPercent: data.growthPercent, updatedByEmail: data.updatedByEmail },
       create: data,
     });
   }
