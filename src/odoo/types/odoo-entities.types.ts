@@ -113,6 +113,13 @@ export interface OdooAccountMove {
   id: number;
   journal_id: OdooMany2One;
   invoice_user_id: OdooMany2One; // "Vendedor"
+  // Cliente exacto de la factura (puede ser un contacto HIJO, ej. una
+  // sucursal) y su razón social/empresa matriz — ver
+  // WholesaleClientTotalsService, que agrupa por `commercial_partner_id`
+  // (el cliente de mayoreo) y desglosa por `partner_id` (el comprador
+  // puntual, ej. sucursal).
+  partner_id: OdooMany2One;
+  commercial_partner_id: OdooMany2One;
   // Órdenes de caja que originaron la factura. Viene vacío en las
   // facturas que NO se emitieron desde un punto de venta (mayoreo,
   // facturación manual) — es justo lo que distingue un canal del otro.
@@ -140,6 +147,8 @@ export interface OdooPosOrderGroup {
 export interface OdooAccountMoveGroup {
   __count: number;
   invoice_user_id?: OdooMany2One; // "Vendedor" (Salesperson) de la factura
+  partner_id?: OdooMany2One;
+  commercial_partner_id?: OdooMany2One;
   amount_untaxed_signed?: number;
   amount_total_signed?: number;
 }
@@ -152,4 +161,12 @@ export interface OdooPosPaymentMethod {
   company_id: OdooMany2One;
   create_date: string;
   write_date: string;
+}
+
+// Fila de pos.payment.read_group agrupada por método de pago — usada por
+// SalesService.findPaymentMethodsSummary (Efectivo vs. otros medios).
+export interface OdooPosPaymentGroup {
+  __count: number;
+  payment_method_id?: OdooMany2One;
+  amount?: number;
 }

@@ -14,6 +14,7 @@ import {
   OdooPosOrderGroup,
   OdooPosOrder,
   OdooPosOrderLine,
+  OdooPosPaymentGroup,
   OdooPosPaymentMethod,
   OdooPosSession,
   OdooProduct,
@@ -265,6 +266,21 @@ export class OdooRepository {
     );
   }
 
+
+  // read_group sobre pos.payment (pagos de las órdenes de caja) — mismo
+  // mecanismo que readGroupPosOrders/readGroupAccountMoves. Lo usa
+  // SalesService.findPaymentMethodsSummary para agrupar por método de
+  // pago (Efectivo vs. otros medios).
+  readGroupPosPayments(credentials: OdooCredentials, options: OdooReadGroupOptions) {
+    const { domain = [], fields, groupby, ...kwargs } = options;
+    return this.executeKw<OdooPosPaymentGroup[]>(
+      credentials,
+      'pos.payment',
+      'read_group',
+      [domain, fields, groupby],
+      { lazy: false, ...kwargs },
+    );
+  }
   // search_count — total de registros que matchean un domain, sin traer
   // los datos. Se usa para armar `meta.total` en endpoints paginados.
   countPosOrders(credentials: OdooCredentials, domain: unknown[] = []) {
@@ -283,6 +299,8 @@ export class OdooRepository {
           'id',
           'journal_id',
           'invoice_user_id',
+          'partner_id',
+          'commercial_partner_id',
           'pos_order_ids',
           // Variantes `_signed`: una nota de crédito viene en negativo,
           // así que sumarlas deja el monto NETO, igual que la lista de

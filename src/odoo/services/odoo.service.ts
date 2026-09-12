@@ -107,4 +107,8 @@ export class OdooService {
       this.odooRepository.readGroupAccountMoves(credentials, options),
     );
   }
+
+  readGroupPosPayments(options: OdooReadGroupOptions) {
+    return this.run((credentials) => this.odooRepository.readGroupPosPayments(credentials, options));
+  }
 }

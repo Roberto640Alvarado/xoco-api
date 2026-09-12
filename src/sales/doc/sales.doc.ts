@@ -40,6 +40,23 @@ export interface TopProductDoc {
   totalRevenue: number;
 }
 
+// Un producto dentro del top de su categoría — ver findTopProductsByCategory.
+// Se ordena por ingresos ($), no por unidades: a diferencia de
+// /sales/top-products, acá SÍ conviven productos por pieza y a granel
+// (ej. "Crocks") en el mismo ranking, porque el ingreso es comparable
+// entre ambos sin necesitar convertir a una unidad común.
+export interface CategoryProductDoc {
+  productId: number;
+  productName: string;
+  revenue: number;
+}
+
+export interface CategoryTopProductsDoc {
+  categoryId: number;
+  categoryName: string;
+  products: CategoryProductDoc[];
+}
+
 export interface DailySalesDoc {
   date: string; // YYYY-MM-DD — día local de la tienda
   orderCount: number;
@@ -92,6 +109,68 @@ export interface SalespersonSalesDoc extends InvoiceTotalsDoc {
 export interface SalespersonSalesReportDoc {
   items: SalespersonSalesDoc[];
   totals: InvoiceTotalsDoc;
+}
+
+// Un comprador puntual (partner_id de la factura) dentro de un cliente de
+// mayoreo — ej. una sucursal de Selectos. Para Operadora del Sur, que
+// factura directo a su propia razón social sin sub-contactos, viene un
+// solo renglón igual al total del cliente (ver WHOLESALE_CLIENTS).
+export interface WholesaleBuyerTotalsDoc extends InvoiceTotalsDoc {
+  partnerId: number;
+  partnerName: string;
+}
+
+// Visitas y venta de un cliente de mayoreo (Selectos, Operadora del Sur),
+// con el desglose por comprador (`buyers`, ordenado por venta desc) — ver
+// WholesaleClientTotalsService.
+export interface WholesaleClientTotalsDoc extends InvoiceTotalsDoc {
+  clientKey: string;
+  clientLabel: string;
+  buyers: WholesaleBuyerTotalsDoc[];
+}
+
+export interface WholesaleClientTotalsReportDoc {
+  items: WholesaleClientTotalsDoc[];
+  totals: InvoiceTotalsDoc;
+}
+
+// Un cliente encontrado por el buscador (cualquier partner de Odoo con
+// al menos una factura que matchea el nombre buscado en el rango de
+// fechas) — ver CustomerSearchService. `commercialPartnerId/Name` es la
+// empresa matriz (igual al propio partner cuando no tiene padre — ver
+// WholesaleClientTotalsService para el mismo concepto en mayoreo).
+export interface CustomerSearchResultDoc extends InvoiceTotalsDoc {
+  partnerId: number;
+  partnerName: string;
+  commercialPartnerId: number;
+  commercialPartnerName: string;
+}
+
+// Un método de pago puntual dentro del desglose de "Efectivo y otros
+// medios" — ver SalesService.findPaymentMethodsSummary. `type` es el
+// campo crudo de Odoo (pos.payment.method.type: "cash" | "bank" |
+// "pay_later", entre otros) — lo que separa Efectivo del resto.
+export interface PaymentMethodTotalsDoc {
+  paymentMethodId: number;
+  paymentMethodName: string;
+  type: string;
+  paymentCount: number;
+  amountTotal: number;
+}
+
+export interface PaymentMethodBucketDoc {
+  paymentCount: number;
+  amountTotal: number;
+}
+
+export interface PaymentMethodsSummaryDoc {
+  cash: PaymentMethodBucketDoc;
+  other: PaymentMethodBucketDoc;
+  total: PaymentMethodBucketDoc;
+  // Desglose por método puntual (Tarjeta, Transferencias, Pedidos YA,
+  // etc.), ordenado por monto descendente — para quien quiera ver más
+  // allá de "efectivo vs. otros".
+  methods: PaymentMethodTotalsDoc[];
 }
 
 // Comparación de conteo/ingresos entre los 2 métodos de agrupar una orden

@@ -82,6 +82,84 @@ describe('SalesService', () => {
     });
   });
 
+  describe('findPaymentMethodsSummary', () => {
+    const EFECTIVO_RAMBLAS: [number, string] = [10, 'Efectivo Ramblas'];
+    const TARJETA: [number, string] = [20, 'Tarjeta'];
+    const TRANSFERENCIA: [number, string] = [21, 'Transferencias bancarias'];
+
+    const PAYMENT_METHODS = [
+      { id: 10, name: 'Efectivo Ramblas', type: 'cash', active: true, company_id: [1, 'Xocolatísimo'] as [number, string], create_date: '2026-01-01', write_date: '2026-01-01' },
+      { id: 20, name: 'Tarjeta', type: 'bank', active: true, company_id: [1, 'Xocolatísimo'] as [number, string], create_date: '2026-01-01', write_date: '2026-01-01' },
+      { id: 21, name: 'Transferencias bancarias', type: 'bank', active: true, company_id: [1, 'Xocolatísimo'] as [number, string], create_date: '2026-01-01', write_date: '2026-01-01' },
+    ];
+
+    it('no pide pagos ni métodos si no hubo órdenes en el rango', async () => {
+      const service = buildService([]);
+
+      const summary = await service.findPaymentMethodsSummary({ dateFrom: SEPT_7, dateTo: SEPT_7 });
+
+      expect(summary).toEqual({
+        cash: { paymentCount: 0, amountTotal: 0 },
+        other: { paymentCount: 0, amountTotal: 0 },
+        total: { paymentCount: 0, amountTotal: 0 },
+        methods: [],
+      });
+      expect(odoo.readGroupPosPayments).not.toHaveBeenCalled();
+      expect(odoo.findPosPaymentMethods).not.toHaveBeenCalled();
+    });
+
+    it('separa Efectivo (type=cash) de otros medios y arma el detalle por método', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        paymentMethods: PAYMENT_METHODS,
+        paymentGroups: [
+          { __count: 8, payment_method_id: EFECTIVO_RAMBLAS, amount: 120.5 },
+          { __count: 3, payment_method_id: TARJETA, amount: 60 },
+          { __count: 2, payment_method_id: TRANSFERENCIA, amount: 19.71 },
+        ],
+      });
+      const service = new SalesService(odoo.service);
+
+      const summary = await service.findPaymentMethodsSummary({
+        dateFrom: SEPT_7,
+        dateTo: SEPT_7,
+        posConfigId: RAMBLAS_ID,
+      });
+
+      expect(summary.cash).toEqual({ paymentCount: 8, amountTotal: 120.5 });
+      expect(summary.other).toEqual({ paymentCount: 5, amountTotal: 79.71 });
+      expect(summary.total).toEqual({ paymentCount: 13, amountTotal: 200.21 });
+
+      // methods ordenados por monto descendente, con el `type` resuelto.
+      expect(summary.methods).toEqual([
+        { paymentMethodId: 10, paymentMethodName: 'Efectivo Ramblas', type: 'cash', paymentCount: 8, amountTotal: 120.5 },
+        { paymentMethodId: 20, paymentMethodName: 'Tarjeta', type: 'bank', paymentCount: 3, amountTotal: 60 },
+        { paymentMethodId: 21, paymentMethodName: 'Transferencias bancarias', type: 'bank', paymentCount: 2, amountTotal: 19.71 },
+      ]);
+    });
+
+    it('pide los pagos de las órdenes del rango (mismo domain de órdenes que el resto de reportes por caja)', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        paymentMethods: PAYMENT_METHODS,
+        paymentGroups: [{ __count: 13, payment_method_id: EFECTIVO_RAMBLAS, amount: 200.21 }],
+      });
+      const service = new SalesService(odoo.service);
+
+      await service.findPaymentMethodsSummary({ dateFrom: SEPT_7, dateTo: SEPT_7, posConfigId: RAMBLAS_ID });
+
+      expect(domainOfCall(odoo.findPosOrders)).toEqual([
+        ['date_order', '>=', UTC_WINDOW_SEPT_7[0]],
+        ['date_order', '<=', UTC_WINDOW_SEPT_7[1]],
+        ['config_id', '=', RAMBLAS_ID],
+        ['state', '!=', 'cancel'],
+      ]);
+      expect(domainOfCall(odoo.readGroupPosPayments)).toEqual([
+        ['pos_order_id', 'in', RAMBLAS_SEPT_7_ORDERS.map((order) => order.id)],
+      ]);
+    });
+  });
+
   describe('findOrders', () => {
     it('arma la tienda y la sesión desde la propia orden, sin resolver sesiones aparte', async () => {
       const service = buildService();
@@ -167,6 +245,77 @@ describe('SalesService', () => {
     });
   });
 
+  describe('findTopProductsByCategory', () => {
+    it('agrupa por categoría (resuelta contra product.product), ordena categorías por venta total y productos por ingresos', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        lines: [
+          lineOf(1, 33617, [10, 'Trufa Leche'], 2, 20),
+          lineOf(2, 33618, [11, 'Americano'], 1, 5),
+          lineOf(3, 33619, [12, 'Crocks Chocolate'], 500, 30),
+        ],
+        products: [
+          productOf(10, [100, 'Bombones']),
+          productOf(11, [101, 'Bebidas']),
+          productOf(12, [100, 'Bombones']),
+        ],
+      });
+      const service = new SalesService(odoo.service);
+
+      const categories = await service.findTopProductsByCategory({
+        dateFrom: SEPT_7,
+        limit: 10,
+        order: 'desc',
+      });
+
+      // Bombones: 20 + 30 = 50 de venta total > Bebidas: 5 -> va primero.
+      expect(categories.map((c) => c.categoryName)).toEqual(['Bombones', 'Bebidas']);
+
+      const bombones = categories.find((c) => c.categoryName === 'Bombones')!;
+      expect(bombones.products.map((p) => p.productName)).toEqual(['Crocks Chocolate', 'Trufa Leche']);
+      expect(bombones.products[0]).toMatchObject({ productId: 12, revenue: 30 });
+
+      const bebidas = categories.find((c) => c.categoryName === 'Bebidas')!;
+      expect(bebidas.products).toEqual([{ productId: 11, productName: 'Americano', revenue: 5 }]);
+    });
+
+    it('agrupa en "Sin categoría" los productos que no matchean contra product.product', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        lines: [lineOf(1, 33617, [10, 'Trufa Leche'], 2, 20)],
+        products: [], // ej. producto archivado que ya no aparece en el search_read
+      });
+      const service = new SalesService(odoo.service);
+
+      const categories = await service.findTopProductsByCategory({ dateFrom: SEPT_7, limit: 10, order: 'desc' });
+
+      expect(categories).toEqual([
+        { categoryId: -1, categoryName: 'Sin categoría', products: [{ productId: 10, productName: 'Trufa Leche', revenue: 20 }] },
+      ]);
+    });
+
+    it('recorta cada categoría a `limit` productos, sin afectar el orden de categorías', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        lines: [
+          lineOf(1, 33617, [10, 'Trufa Leche'], 1, 30),
+          lineOf(2, 33617, [11, 'Americano'], 1, 20),
+          lineOf(3, 33617, [13, 'Capuchino'], 1, 10),
+        ],
+        products: [
+          productOf(10, [100, 'Bebidas']),
+          productOf(11, [100, 'Bebidas']),
+          productOf(13, [100, 'Bebidas']),
+        ],
+      });
+      const service = new SalesService(odoo.service);
+
+      const [bebidas] = await service.findTopProductsByCategory({ dateFrom: SEPT_7, limit: 2, order: 'desc' });
+
+      expect(bebidas.products.map((p) => p.productName)).toEqual(['Trufa Leche', 'Americano']);
+    });
+  });
+
   describe('getReconciliation', () => {
     it('separa el método actual del anterior y lista las órdenes donde difieren', async () => {
       odoo = createOdooServiceMock({
@@ -234,6 +383,28 @@ function lineOf(
     price_subtotal_incl: subtotalIncl,
     discount: 0,
     full_product_name: product[1],
+    create_date: '2026-09-07 18:41:25',
+    write_date: '2026-09-07 18:41:25',
+  };
+}
+
+// product.product mínimo para findTopProductsByCategory — solo lleva los
+// campos que ese método de verdad usa (id, categ_id); el resto son
+// obligatorios en el tipo pero no importan para el test.
+function productOf(id: number, categ: [number, string]): import('../../odoo/types/odoo-entities.types.js').OdooProduct {
+  return {
+    id,
+    display_name: `Producto ${id}`,
+    default_code: false,
+    barcode: false,
+    categ_id: categ,
+    type: 'consu',
+    list_price: 0,
+    standard_price: 0,
+    uom_id: [1, 'Unidades'],
+    qty_available: 0,
+    active: true,
+    product_tmpl_id: [id, `Producto ${id}`],
     create_date: '2026-09-07 18:41:25',
     write_date: '2026-09-07 18:41:25',
   };

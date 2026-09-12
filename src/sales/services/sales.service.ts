@@ -10,13 +10,18 @@ import {
   toStoreDate,
 } from '../../common/utils/store-date.util.js';
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
+import { roundMoney } from '../../common/utils/money.util.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
+import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-category-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
 import {
+  CategoryTopProductsDoc,
   DailySalesDoc,
   PaginatedOrdersDoc,
+  PaymentMethodBucketDoc,
+  PaymentMethodsSummaryDoc,
   ReconciliationOrderDoc,
   ReconciliationStoreDoc,
   RefDoc,
@@ -33,6 +38,12 @@ import {
 const RECONCILIATION_MARGIN_DAYS = 2;
 
 const UNKNOWN_REF: RefDoc = { id: -1, name: 'Desconocido' };
+
+// Todo producto en Odoo debería tener categ_id (campo obligatorio), pero
+// se deja un fallback igual que UNKNOWN_REF por si alguno queda sin
+// resolver (ej. producto archivado que ya no matchea el search_read de
+// productos) — mejor agruparlo aparte que perder su ingreso del total.
+const UNCATEGORIZED_REF: RefDoc = { id: -1, name: 'Sin categoría' };
 
 function many2OneToRef(value: OdooMany2One): RefDoc | null {
   return value ? { id: value[0], name: value[1] } : null;
@@ -171,6 +182,106 @@ export class SalesService {
       .slice(0, query.limit);
   }
 
+  // Top N productos por INGRESOS dentro de cada categoría (product.category
+  // de Odoo). A diferencia de findTopProducts, acá NO se separan los
+  // productos a granel: el ingreso ($) es comparable entre un producto por
+  // pieza y uno por peso, así que conviven en el mismo ranking de su
+  // categoría sin necesitar una unidad común.
+  //
+  // pos.order.line no trae la categoría del producto — solo product_id
+  // (id, nombre) — así que hace falta un segundo viaje a product.product
+  // para resolver categ_id de los productos que sí se vendieron en el
+  // rango (nunca se piden TODOS los productos del catálogo, solo los que
+  // aparecen en `lines`).
+  async findTopProductsByCategory(
+    query: FindTopProductsByCategoryQueryDto,
+  ): Promise<CategoryTopProductsDoc[]> {
+    const dateTo = query.dateTo ?? query.dateFrom;
+    const orders = await this.fetchAllPages(
+      (options) => this.odooService.findPosOrders(options),
+      this.buildOrdersDomain(query.dateFrom, dateTo, query.posConfigId, { excludeCancelled: true }),
+      'findTopProductsByCategory (órdenes)',
+    );
+    if (orders.length === 0) {
+      return [];
+    }
+
+    const orderIds = orders.map((order) => order.id);
+    const lines = await this.fetchAllPages(
+      (options) => this.odooService.findPosOrderLines(options),
+      [['order_id', 'in', orderIds]],
+      'findTopProductsByCategory (líneas)',
+    );
+
+    interface ProductRevenue {
+      productId: number;
+      productName: string;
+      revenue: number;
+    }
+    const revenueByProductId = new Map<number, ProductRevenue>();
+    for (const line of lines) {
+      if (!line.product_id) continue;
+      const [productId, productName] = line.product_id;
+      const existing = revenueByProductId.get(productId);
+      if (existing) {
+        existing.revenue += line.price_subtotal_incl;
+      } else {
+        revenueByProductId.set(productId, { productId, productName, revenue: line.price_subtotal_incl });
+      }
+    }
+    if (revenueByProductId.size === 0) {
+      return [];
+    }
+
+    const products = await this.fetchAllPages(
+      (options) => this.odooService.findProducts(options),
+      [['id', 'in', [...revenueByProductId.keys()]]],
+      'findTopProductsByCategory (productos)',
+    );
+    const categoryByProductId = new Map<number, RefDoc>();
+    for (const product of products) {
+      categoryByProductId.set(
+        product.id,
+        many2OneToRef(product.categ_id) ?? UNCATEGORIZED_REF,
+      );
+    }
+
+    interface CategoryBucket {
+      categoryId: number;
+      categoryName: string;
+      totalRevenue: number;
+      products: { productId: number; productName: string; revenue: number }[];
+    }
+    const byCategory = new Map<number, CategoryBucket>();
+    for (const product of revenueByProductId.values()) {
+      const category = categoryByProductId.get(product.productId) ?? UNCATEGORIZED_REF;
+      const bucket = byCategory.get(category.id) ?? {
+        categoryId: category.id,
+        categoryName: category.name,
+        totalRevenue: 0,
+        products: [],
+      };
+      bucket.totalRevenue += product.revenue;
+      bucket.products.push({
+        productId: product.productId,
+        productName: product.productName,
+        revenue: product.revenue,
+      });
+      byCategory.set(category.id, bucket);
+    }
+
+    const direction = query.order === 'asc' ? 1 : -1;
+    return [...byCategory.values()]
+      .sort((a, b) => b.totalRevenue - a.totalRevenue) // categorías con más venta primero
+      .map((bucket) => ({
+        categoryId: bucket.categoryId,
+        categoryName: bucket.categoryName,
+        products: bucket.products
+          .sort((a, b) => direction * (a.revenue - b.revenue))
+          .slice(0, query.limit),
+      }));
+  }
+
   // Ventas agregadas por día local de la tienda — para la gráfica de
   // tendencia del dashboard. Rellena con ceros los días del rango que no
   // tuvieron ninguna venta, para que la gráfica no tenga huecos.
@@ -204,6 +315,74 @@ export class SalesService {
     return [...totalsByDate.entries()]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([date, totals]) => ({ date, ...totals }));
+  }
+
+  // "Efectivo vs. otros medios" — agrega los pagos (pos.payment) de las
+  // órdenes del rango/tienda pedidos, agrupados por método de pago, y los
+  // separa en 2 baldes según `pos.payment.method.type` de Odoo: "cash" es
+  // Efectivo (cada tienda tiene el suyo propio, ej. "Efectivo Ramblas" —
+  // se agrupan todos como un solo balde), cualquier otro type (tarjeta,
+  // transferencia, apps de delivery, cuenta de cliente) cae en "otros
+  // medios". `methods` trae el desglose completo, por si se quiere ver
+  // más allá de las 2 categorías.
+  //
+  // Mismo domain de órdenes que el resto de reportes por caja
+  // (buildOrdersDomain, excluye canceladas) — los pagos no tienen tienda
+  // propia, se resuelven a través de la orden que pagan.
+  async findPaymentMethodsSummary(query: FindDailySummaryQueryDto): Promise<PaymentMethodsSummaryDoc> {
+    const dateTo = query.dateTo ?? query.dateFrom;
+
+    const emptyBucket = (): PaymentMethodBucketDoc => ({ paymentCount: 0, amountTotal: 0 });
+
+    const orders = await this.fetchAllPages(
+      (options) => this.odooService.findPosOrders(options),
+      this.buildOrdersDomain(query.dateFrom, dateTo, query.posConfigId, { excludeCancelled: true }),
+      'findPaymentMethodsSummary (órdenes)',
+    );
+    if (orders.length === 0) {
+      return { cash: emptyBucket(), other: emptyBucket(), total: emptyBucket(), methods: [] };
+    }
+
+    const orderIds = orders.map((order) => order.id);
+    const [paymentGroups, paymentMethods] = await Promise.all([
+      this.odooService.readGroupPosPayments({
+        domain: [['pos_order_id', 'in', orderIds]],
+        fields: ['amount'],
+        groupby: ['payment_method_id'],
+      }),
+      this.odooService.findPosPaymentMethods(),
+    ]);
+
+    const typeByMethodId = new Map(paymentMethods.map((method) => [method.id, method.type]));
+
+    const methods = paymentGroups
+      .map((group) => {
+        const method = many2OneToRef(group.payment_method_id ?? false);
+        if (!method) return null;
+        return {
+          paymentMethodId: method.id,
+          paymentMethodName: method.name,
+          type: typeByMethodId.get(method.id) ?? 'unknown',
+          paymentCount: group.__count,
+          amountTotal: group.amount ?? 0,
+        };
+      })
+      .filter((method): method is NonNullable<typeof method> => method !== null)
+      .sort((a, b) => b.amountTotal - a.amountTotal);
+
+    const cash = emptyBucket();
+    const other = emptyBucket();
+    for (const method of methods) {
+      const bucket = method.type === 'cash' ? cash : other;
+      bucket.paymentCount += method.paymentCount;
+      bucket.amountTotal = roundMoney(bucket.amountTotal + method.amountTotal);
+    }
+    const total: PaymentMethodBucketDoc = {
+      paymentCount: cash.paymentCount + other.paymentCount,
+      amountTotal: roundMoney(cash.amountTotal + other.amountTotal),
+    };
+
+    return { cash, other, total, methods };
   }
 
   // Tiendas activas — para el filtro de tienda del dashboard.

@@ -101,6 +101,13 @@ function move(
     id: nextId++,
     journal_id: journal,
     invoice_user_id: salesperson,
+    // Ningún test de StoreInvoiceTotalsService/SalespersonSalesService
+    // depende del cliente de la factura — solo lo necesita
+    // WholesaleClientTotalsService (ver wholesale-client-totals.mock.ts),
+    // que arma sus propias facturas con partner_id/commercial_partner_id
+    // reales en vez de este helper.
+    partner_id: false,
+    commercial_partner_id: false,
     pos_order_ids: posOrderIds,
     // El IVA de El Salvador es 13%: el monto sin impuesto es el total
     // entre 1.13 (redondeado a centavos, como lo guarda Odoo).

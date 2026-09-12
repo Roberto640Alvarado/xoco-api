@@ -5,8 +5,12 @@ import { Roles } from '../../common/decorators/roles.decorator.js';
 import { SalesService } from '../services/sales.service.js';
 import { SalespersonSalesService } from '../services/salesperson-sales.service.js';
 import { StoreInvoiceTotalsService } from '../services/store-invoice-totals.service.js';
+import { WholesaleClientTotalsService } from '../services/wholesale-client-totals.service.js';
+import { CustomerSearchService } from '../services/customer-search.service.js';
+import { FindCustomerSearchQueryDto } from '../dto/find-customer-search-query.dto.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
+import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-category-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
 import { FindInvoiceRangeQueryDto } from '../dto/find-invoice-range-query.dto.js';
@@ -22,6 +26,8 @@ export class SalesController {
     private readonly salesService: SalesService,
     private readonly salespersonSalesService: SalespersonSalesService,
     private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
+    private readonly wholesaleClientTotalsService: WholesaleClientTotalsService,
+    private readonly customerSearchService: CustomerSearchService,
   ) {}
 
   @Get('orders')
@@ -43,6 +49,19 @@ export class SalesController {
   })
   findTopProducts(@Query() query: FindTopProductsQueryDto) {
     return this.salesService.findTopProducts(query);
+  }
+
+  @Get('top-products-by-category')
+  @ApiOperation({
+    summary: 'Top N productos por ingresos DENTRO DE CADA CATEGORÍA (product.category de Odoo), en un rango de fecha, por tienda',
+    description:
+      'Categorías ordenadas por su venta total (mayor primero); dentro de cada una, sus productos ordenados por ' +
+      'ingresos ($). A diferencia de /sales/top-products, acá NO se excluyen los productos a granel (ej. Crocks): ' +
+      'el ingreso es comparable entre un producto por pieza y uno por peso, así que conviven en el ranking de su ' +
+      'categoría. Excluye órdenes canceladas. Sin posConfigId agrega todas las tiendas.',
+  })
+  findTopProductsByCategory(@Query() query: FindTopProductsByCategoryQueryDto) {
+    return this.salesService.findTopProductsByCategory(query);
   }
 
   @Get('daily-summary')
@@ -87,6 +106,46 @@ export class SalesController {
   })
   findTotalsByStore(@Query() query: FindInvoiceRangeQueryDto) {
     return this.storeInvoiceTotalsService.findTotalsByStore(query);
+  }
+
+  @Get('by-wholesale-client')
+  @ApiOperation({
+    summary: 'Visitas y venta por CLIENTE DE MAYOREO (Selectos, Operadora del Sur), con desglose por comprador',
+    description:
+      'Mismas facturas y mismo rango que /sales/by-salesperson y /sales/by-store, pero agrupadas por cliente de ' +
+      'mayoreo (commercial_partner_id de Odoo) en vez de por vendedor o tienda — son cuentas que facturan sin ' +
+      'pasar por caja (ver /sales/by-store, `outsideStores`). Cada cliente trae además su desglose por comprador ' +
+      'puntual (partner_id, ej. una sucursal de Selectos), ordenado por venta descendente. Los montos van netos ' +
+      'de notas de crédito, igual que el resto de /sales basado en facturas.',
+  })
+  findTotalsByWholesaleClient(@Query() query: FindInvoiceRangeQueryDto) {
+    return this.wholesaleClientTotalsService.findTotalsByClient(query);
+  }
+
+  @Get('customers/search')
+  @ApiOperation({
+    summary: 'Buscador general de clientes por nombre, con su venta total facturada en un rango de fechas',
+    description:
+      'No está limitado a los clientes de mayoreo fijos de Ventas Mayoreo — busca contra CUALQUIER partner de ' +
+      'Odoo con al menos una factura en el rango cuyo nombre matchea `q` (mayoreo, minorista, persona natural). ' +
+      'Cada resultado es un cliente puntual (partner_id de la factura, ej. una sucursal) con su empresa matriz ' +
+      '(commercialPartnerId/Name) al lado para contexto. Ordenado por venta descendente, recortado a `limit`.',
+  })
+  searchCustomers(@Query() query: FindCustomerSearchQueryDto) {
+    return this.customerSearchService.search(query);
+  }
+
+  @Get('payment-methods')
+  @ApiOperation({
+    summary: 'Venta por método de pago (Efectivo vs. otros medios), por rango de fecha y tienda',
+    description:
+      'Agrupa los pagos (pos.payment) de las órdenes del rango/tienda pedidos por método de pago, separados en 2 ' +
+      'baldes según el `type` de Odoo: Efectivo (cada tienda tiene el suyo, se suman todos) vs. cualquier otro ' +
+      'medio (tarjeta, transferencia, apps de delivery, cuenta de cliente). `methods` trae el desglose completo ' +
+      'por método puntual. Excluye órdenes canceladas. Sin posConfigId agrega todas las tiendas.',
+  })
+  findPaymentMethodsSummary(@Query() query: FindDailySummaryQueryDto) {
+    return this.salesService.findPaymentMethodsSummary(query);
   }
 
   @Get('reconciliation')
