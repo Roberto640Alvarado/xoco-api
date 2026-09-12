@@ -4,10 +4,14 @@ import {
   OdooCredentials,
   OdooJsonRpcError,
   OdooJsonRpcSuccess,
+  OdooReadGroupOptions,
   OdooSearchReadOptions,
 } from '../types/odoo-common.types.js';
 import {
+  OdooAccountMove,
+  OdooAccountMoveGroup,
   OdooPosConfig,
+  OdooPosOrderGroup,
   OdooPosOrder,
   OdooPosOrderLine,
   OdooPosPaymentMethod,
@@ -139,7 +143,22 @@ export class OdooRepository {
       'search_read',
       args,
       {
-        fields: ['id', 'name', 'warehouse_id', 'company_id', 'active', 'create_date', 'write_date'],
+        fields: [
+          'id',
+          'name',
+          'warehouse_id',
+          'company_id',
+          'active',
+          'invoice_journal_id',
+          'ccf_journal_id',
+          'nr_journal_id',
+          'fex_journal_id',
+          'nc_journal_id',
+          'nd_journal_id',
+          'anu_journal_id',
+          'create_date',
+          'write_date',
+        ],
         limit: 100,
         ...kwargs,
       },
@@ -250,5 +269,59 @@ export class OdooRepository {
   // los datos. Se usa para armar `meta.total` en endpoints paginados.
   countPosOrders(credentials: OdooCredentials, domain: unknown[] = []) {
     return this.executeKw<number>(credentials, 'pos.order', 'search_count', [domain]);
+  }
+
+  findAccountMoves(credentials: OdooCredentials, options?: OdooSearchReadOptions) {
+    const { args, kwargs } = this.toSearchReadArgs(options);
+    return this.executeKw<OdooAccountMove[]>(
+      credentials,
+      'account.move',
+      'search_read',
+      args,
+      {
+        fields: [
+          'id',
+          'journal_id',
+          'invoice_user_id',
+          'pos_order_ids',
+          // Variantes `_signed`: una nota de crédito viene en negativo,
+          // así que sumarlas deja el monto NETO, igual que la lista de
+          // facturas de Odoo.
+          'amount_untaxed_signed',
+          'amount_total_signed',
+        ],
+        limit: 100,
+        ...kwargs,
+      },
+    );
+  }
+
+  // read_group sobre pos.order — mismo mecanismo que
+  // readGroupAccountMoves (ver abajo).
+  readGroupPosOrders(credentials: OdooCredentials, options: OdooReadGroupOptions) {
+    const { domain = [], fields, groupby, ...kwargs } = options;
+    return this.executeKw<OdooPosOrderGroup[]>(
+      credentials,
+      'pos.order',
+      'read_group',
+      [domain, fields, groupby],
+      { lazy: false, ...kwargs },
+    );
+  }
+
+  // read_group sobre account.move (facturas) — Odoo agrupa y suma del
+  // lado del servidor, igual que cuando se agrupa la lista de facturas en
+  // su interfaz. `lazy: false` es lo que hace que cada fila traiga
+  // `__count` y todos los groupby resueltos en una sola llamada (con
+  // `lazy: true`, el default, Odoo solo expande el primer groupby).
+  readGroupAccountMoves(credentials: OdooCredentials, options: OdooReadGroupOptions) {
+    const { domain = [], fields, groupby, ...kwargs } = options;
+    return this.executeKw<OdooAccountMoveGroup[]>(
+      credentials,
+      'account.move',
+      'read_group',
+      [domain, fields, groupby],
+      { lazy: false, ...kwargs },
+    );
   }
 }

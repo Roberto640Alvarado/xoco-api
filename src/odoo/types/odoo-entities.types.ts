@@ -36,6 +36,22 @@ export interface OdooPosConfig {
   warehouse_id: OdooMany2One;
   company_id: OdooMany2One;
   active: boolean;
+  // Diarios contables en los que caen las facturas de esta tienda. El
+  // primero es el estándar de Odoo; el resto los agrega la localización
+  // fiscal de El Salvador (CCF, nota de remisión, exportación, nota de
+  // crédito/débito, anulación). Se consultan para poder decir a qué
+  // tienda pertenece una factura — ver StoreInvoiceTotalsService.
+  //
+  // Ojo: `anu_journal_id` (Anulación) apunta al MISMO diario en las
+  // cuatro tiendas, así que no sirve para identificar una; por eso el
+  // mapa descarta los diarios compartidos.
+  invoice_journal_id: OdooMany2One;
+  ccf_journal_id: OdooMany2One;
+  nr_journal_id: OdooMany2One;
+  fex_journal_id: OdooMany2One;
+  nc_journal_id: OdooMany2One;
+  nd_journal_id: OdooMany2One;
+  anu_journal_id: OdooMany2One;
   create_date: string;
   write_date: string;
 }
@@ -89,6 +105,43 @@ export interface OdooPosOrderLine {
   full_product_name: string;
   create_date: string;
   write_date: string;
+}
+
+// Factura de cliente. Solo los campos que hacen falta para atribuirla a
+// una tienda y contarla como visita (ver StoreInvoiceTotalsService).
+export interface OdooAccountMove {
+  id: number;
+  journal_id: OdooMany2One;
+  invoice_user_id: OdooMany2One; // "Vendedor"
+  // Órdenes de caja que originaron la factura. Viene vacío en las
+  // facturas que NO se emitieron desde un punto de venta (mayoreo,
+  // facturación manual) — es justo lo que distingue un canal del otro.
+  pos_order_ids: number[];
+  amount_untaxed_signed: number;
+  amount_total_signed: number;
+}
+
+// Fila agregada de `pos.order` que devuelve `read_group` — se usa para
+// saber qué vendedor factura desde la caja de qué tienda.
+export interface OdooPosOrderGroup {
+  __count: number;
+  user_id?: OdooMany2One;
+  config_id?: OdooMany2One;
+}
+
+// Fila agregada de `account.move` tal como la devuelve `read_group`.
+// `__count` es el número de facturas del grupo (lo que el negocio llama
+// "visitas"). Los campos agregados son opcionales porque dependen de los
+// `fields` que se pidieron en la llamada.
+//
+// Se usan las variantes `_signed` porque son las que muestra la propia
+// lista de facturas de Odoo: en una nota de crédito vienen en negativo,
+// así que la suma del grupo queda neta.
+export interface OdooAccountMoveGroup {
+  __count: number;
+  invoice_user_id?: OdooMany2One; // "Vendedor" (Salesperson) de la factura
+  amount_untaxed_signed?: number;
+  amount_total_signed?: number;
 }
 
 export interface OdooPosPaymentMethod {

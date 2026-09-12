@@ -1,8 +1,11 @@
 import { Mock, vi } from 'vitest';
 import { OdooService } from '../../../odoo/services/odoo.service.js';
 import {
+  OdooAccountMove,
+  OdooAccountMoveGroup,
   OdooPosConfig,
   OdooPosOrder,
+  OdooPosOrderGroup,
   OdooPosOrderLine,
   OdooPosSession,
 } from '../../../odoo/types/odoo-entities.types.js';
@@ -14,6 +17,9 @@ export interface OdooServiceMock {
   findPosSessions: Mock;
   findPosConfigs: Mock;
   countPosOrders: Mock;
+  findAccountMoves: Mock;
+  readGroupAccountMoves: Mock;
+  readGroupPosOrders: Mock;
 }
 
 export interface OdooServiceMockData {
@@ -21,6 +27,9 @@ export interface OdooServiceMockData {
   lines?: OdooPosOrderLine[];
   sessions?: OdooPosSession[];
   configs?: OdooPosConfig[];
+  moves?: OdooAccountMove[];
+  moveGroups?: OdooAccountMoveGroup[];
+  orderGroups?: OdooPosOrderGroup[];
 }
 
 // Doble de OdooService que devuelve siempre el mismo conjunto de
@@ -36,6 +45,9 @@ export function createOdooServiceMock(data: OdooServiceMockData = {}): OdooServi
     findPosSessions: vi.fn().mockResolvedValue(data.sessions ?? []),
     findPosConfigs: vi.fn().mockResolvedValue(data.configs ?? []),
     countPosOrders: vi.fn().mockResolvedValue(orders.length),
+    findAccountMoves: vi.fn().mockResolvedValue(data.moves ?? []),
+    readGroupAccountMoves: vi.fn().mockResolvedValue(data.moveGroups ?? []),
+    readGroupPosOrders: vi.fn().mockResolvedValue(data.orderGroups ?? []),
   };
 
   return { ...mock, service: mock as unknown as OdooService };

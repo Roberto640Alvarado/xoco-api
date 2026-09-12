@@ -8,7 +8,11 @@ import {
   OdooRepository,
   OdooRequestError,
 } from '../repositories/odoo.repository.js';
-import { OdooCredentials, OdooSearchReadOptions } from '../types/odoo-common.types.js';
+import {
+  OdooCredentials,
+  OdooReadGroupOptions,
+  OdooSearchReadOptions,
+} from '../types/odoo-common.types.js';
 
 // Única puerta de entrada al módulo Odoo para el resto de la app. Resuelve
 // las credenciales (uid/apiKey desde Mongo, baseUrl/db desde env) en cada
@@ -88,5 +92,19 @@ export class OdooService {
 
   countPosOrders(domain?: unknown[]) {
     return this.run((credentials) => this.odooRepository.countPosOrders(credentials, domain));
+  }
+
+  findAccountMoves(options?: OdooSearchReadOptions) {
+    return this.run((credentials) => this.odooRepository.findAccountMoves(credentials, options));
+  }
+
+  readGroupPosOrders(options: OdooReadGroupOptions) {
+    return this.run((credentials) => this.odooRepository.readGroupPosOrders(credentials, options));
+  }
+
+  readGroupAccountMoves(options: OdooReadGroupOptions) {
+    return this.run((credentials) =>
+      this.odooRepository.readGroupAccountMoves(credentials, options),
+    );
   }
 }

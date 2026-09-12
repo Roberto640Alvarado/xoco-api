@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SalesService } from '../../sales/services/sales.service.js';
+import { StoreInvoiceTotalsService } from '../../sales/services/store-invoice-totals.service.js';
 import { SalesGoalsRepository } from '../repositories/sales-goals.repository.js';
 import { UpsertSalesGoalsBulkDto } from '../dto/upsert-sales-goals-bulk.dto.js';
 import { FindSalesGoalsSummaryQueryDto } from '../dto/find-sales-goals-summary-query.dto.js';
@@ -30,10 +31,14 @@ function goalKey(posConfigId: number, year: number, month: number): string {
 const MAX_CHAIN_DEPTH = 24;
 
 // Módulo "Venta Mensual": mismo diseño que GoalsService (src/goals/), pero
-// la métrica es el monto real en dólares (totalRevenue de
-// SalesService.findDailySummary) en vez de la cantidad de órdenes, y con
-// su propio % de crecimiento guardado por separado (StoreSalesGoal, no
-// StoreGoal) — ver plan-history.
+// la métrica es el monto real en dólares en vez de la cantidad de
+// visitas, y con su propio % de crecimiento guardado por separado
+// (StoreSalesGoal, no StoreGoal) — ver plan-history.
+//
+// La venta sale de las FACTURAS de cada tienda (vía
+// StoreInvoiceTotalsService), con impuesto incluido y neta de notas de
+// crédito — el mismo número que el equipo saca del módulo de
+// Contabilidad de Odoo. Ver plan-history "visitas-por-vendedor-facturas".
 @Injectable()
 export class SalesGoalsService {
   private readonly logger = new Logger(SalesGoalsService.name);
@@ -41,6 +46,7 @@ export class SalesGoalsService {
   constructor(
     private readonly salesGoalsRepository: SalesGoalsRepository,
     private readonly salesService: SalesService,
+    private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
   ) {}
 
   async upsertBulk(dto: UpsertSalesGoalsBulkDto): Promise<StoreSalesGoalDoc[]> {
@@ -63,26 +69,39 @@ export class SalesGoalsService {
     }));
   }
 
-  // Monto real (suma de totalRevenue) de una tienda en un mes completo —
-  // cacheado por (tienda, año, mes) dentro de una sola llamada a
-  // getSummary(), igual que GoalsService.getActualOrdersForMonth.
+  // Venta facturada de TODAS las tiendas en un rango. Cacheado por rango
+  // dentro de una sola llamada a getSummary(): la atribución de facturas a
+  // tienda se resuelve de una vez para las cuatro, así que se pide por
+  // rango y no por tienda (mismo patrón que GoalsService).
+  private getRevenueForRange(
+    dateFrom: string,
+    dateTo: string,
+    cache: Map<string, Promise<Map<number, number>>>,
+  ): Promise<Map<number, number>> {
+    const key = `${dateFrom}:${dateTo}`;
+    let cached = cache.get(key);
+    if (!cached) {
+      cached = this.storeInvoiceTotalsService
+        .findTotalsByStore({ dateFrom, dateTo })
+        .then((report) => new Map(report.items.map((item) => [item.posConfigId, item.amountTotal])));
+      cache.set(key, cached);
+    }
+    return cached;
+  }
+
+  // Venta facturada de una tienda en un mes completo.
   private async getActualRevenueForMonth(
     posConfigId: number,
     year: number,
     month: number,
-    cache: Map<string, Promise<number>>,
+    cache: Map<string, Promise<Map<number, number>>>,
   ): Promise<number> {
-    const key = goalKey(posConfigId, year, month);
-    let cached = cache.get(key);
-    if (!cached) {
-      const dateFrom = toIsoDate(year, month, 1);
-      const dateTo = toIsoDate(year, month, daysInMonthOf(year, month));
-      cached = this.salesService
-        .findDailySummary({ dateFrom, dateTo, posConfigId })
-        .then((days) => days.reduce((sum, day) => sum + day.totalRevenue, 0));
-      cache.set(key, cached);
-    }
-    return cached;
+    const revenue = await this.getRevenueForRange(
+      toIsoDate(year, month, 1),
+      toIsoDate(year, month, daysInMonthOf(year, month)),
+      cache,
+    );
+    return revenue.get(posConfigId) ?? 0;
   }
 
   // "Meta" ($) encadenada mes a mes: meta(mes N) = meta(mes N-1) * (1 + %
@@ -96,7 +115,7 @@ export class SalesGoalsService {
     month: number,
     growthByKey: Map<string, number>,
     targetMemo: Map<string, Promise<number | null>>,
-    actualRevenueCache: Map<string, Promise<number>>,
+    actualRevenueCache: Map<string, Promise<Map<number, number>>>,
     depth: number,
   ): Promise<number | null> {
     const key = goalKey(posConfigId, year, month);
@@ -166,19 +185,29 @@ export class SalesGoalsService {
       growthByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), goal.growthPercent);
     }
 
-    const actualRevenueCache = new Map<string, Promise<number>>();
+    const actualRevenueCache = new Map<string, Promise<Map<number, number>>>();
     const targetMemo = new Map<string, Promise<number | null>>();
+
+    // La venta del mes en curso se resuelve de una sola vez para todas las
+    // tiendas (la atribución de facturas es global, no por tienda).
+    const currentRevenue =
+      dateTo === null
+        ? new Map<number, number>()
+        : await this.getRevenueForRange(dateFrom, dateTo, actualRevenueCache);
 
     return Promise.all(
       stores.map(async (store) => {
-        const [currentMonthDays, targetRevenue] = await Promise.all([
-          dateTo === null
-            ? Promise.resolve([])
-            : this.salesService.findDailySummary({ dateFrom, dateTo, posConfigId: store.id }),
-          this.resolveTargetRevenue(store.id, year, month, growthByKey, targetMemo, actualRevenueCache, 0),
-        ]);
+        const targetRevenue = await this.resolveTargetRevenue(
+          store.id,
+          year,
+          month,
+          growthByKey,
+          targetMemo,
+          actualRevenueCache,
+          0,
+        );
 
-        const actualRevenue = currentMonthDays.reduce((sum, day) => sum + day.totalRevenue, 0);
+        const actualRevenue = currentRevenue.get(store.id) ?? 0;
         const growthPercent = growthByKey.get(goalKey(store.id, year, month)) ?? null;
 
         const reachPercent = targetRevenue ? actualRevenue / targetRevenue : null;

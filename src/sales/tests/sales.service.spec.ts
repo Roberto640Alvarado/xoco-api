@@ -7,6 +7,7 @@ import {
   RAMBLAS_SEPT_7_ORDERS,
   RAMBLAS_SEPT_7_TOTAL,
 } from './mocks/pos-orders.mock.js';
+import { RAMBLAS } from './mocks/pos-configs.mock.js';
 
 const SEPT_7 = '2026-09-07';
 const RAMBLAS_ID = 3;
@@ -187,17 +188,7 @@ describe('SalesService', () => {
             write_date: '2026-09-08 15:10:29',
           },
         ],
-        configs: [
-          {
-            id: RAMBLAS_ID,
-            name: 'Tienda Ramblas',
-            warehouse_id: false,
-            company_id: [1, 'CACAO, S.A DE C.V'],
-            active: true,
-            create_date: '2026-01-01 00:00:00',
-            write_date: '2026-01-01 00:00:00',
-          },
-        ],
+        configs: [RAMBLAS],
       });
       const service = new SalesService(odoo.service);
 

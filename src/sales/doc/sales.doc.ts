@@ -52,6 +52,48 @@ export interface StoreDoc {
   name: string;
 }
 
+// Visitas y venta de un grupo de facturas. Es la forma que comparten los
+// reportes basados en facturas: "visitas" es la cantidad de facturas, y
+// los montos son la suma de esas mismas facturas, netos de notas de
+// crédito (igual que los suma la lista de facturas de Odoo).
+export interface InvoiceTotalsDoc {
+  visits: number;
+  amountUntaxed: number; // venta sin impuesto
+  amountTax: number; // impuesto (amountTotal - amountUntaxed)
+  amountTotal: number; // venta con impuesto
+}
+
+// Visitas y venta por TIENDA — es lo que alimenta "Visitas a la fecha" y
+// "Venta Mensual" del panel (ver StoreInvoiceTotalsService).
+export interface StoreInvoiceTotalsDoc extends InvoiceTotalsDoc {
+  posConfigId: number;
+  storeName: string;
+}
+
+export interface StoreInvoiceTotalsReportDoc {
+  items: StoreInvoiceTotalsDoc[];
+  totals: InvoiceTotalsDoc; // suma de las tiendas — el "Total Mensual" del panel
+  // Facturas del rango que no son de ninguna tienda (mayoreo: factura sin
+  // pasar por caja). NO están incluidas en `totals` — se devuelven para
+  // que el número no desaparezca sin explicación.
+  outsideStores: InvoiceTotalsDoc;
+}
+
+// "Visitas" según el negocio: el número de FACTURAS de cliente emitidas
+// en el rango, agrupadas por vendedor — exactamente lo que el equipo
+// saca hoy a mano desde el módulo de Contabilidad de Odoo (lista de
+// facturas + agrupar por vendedor). Es una fuente distinta a las órdenes
+// de POS: incluye también el canal de mayoreo, que no pasa por caja.
+export interface SalespersonSalesDoc extends InvoiceTotalsDoc {
+  salespersonId: number | null; // null cuando la factura no tiene vendedor asignado
+  salespersonName: string;
+}
+
+export interface SalespersonSalesReportDoc {
+  items: SalespersonSalesDoc[];
+  totals: InvoiceTotalsDoc;
+}
+
 // Comparación de conteo/ingresos entre los 2 métodos de agrupar una orden
 // en un día: por día LOCAL de `date_order` (el método oficial de la app, y
 // el que usan los reportes propios de Odoo) vs. por fecha de SESIÓN
