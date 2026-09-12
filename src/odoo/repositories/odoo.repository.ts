@@ -236,6 +236,7 @@ export class OdooRepository {
           'id',
           'order_id',
           'product_id',
+          'product_uom_id',
           'qty',
           'price_unit',
           'price_subtotal',
@@ -266,7 +267,6 @@ export class OdooRepository {
     );
   }
 
-
   // read_group sobre pos.payment (pagos de las órdenes de caja) — mismo
   // mecanismo que readGroupPosOrders/readGroupAccountMoves. Lo usa
   // SalesService.findPaymentMethodsSummary para agrupar por método de
@@ -281,6 +281,7 @@ export class OdooRepository {
       { lazy: false, ...kwargs },
     );
   }
+
   // search_count — total de registros que matchean un domain, sin traer
   // los datos. Se usa para armar `meta.total` en endpoints paginados.
   countPosOrders(credentials: OdooCredentials, domain: unknown[] = []) {

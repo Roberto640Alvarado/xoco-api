@@ -1,18 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { OdooMany2One, OdooSearchReadOptions } from '../../odoo/types/odoo-common.types.js';
-import { OdooPosOrder } from '../../odoo/types/odoo-entities.types.js';
+import { OdooPosOrder, OdooPosOrderLine } from '../../odoo/types/odoo-entities.types.js';
 import { OdooPosOrderState } from '../../odoo/enums/odoo-pos-order.enum.js';
 import {
   enumerateDates,
+  endOfMonth,
   shiftDate,
+  shiftMonthStart,
+  startOfMonth,
   storeDayRangeToUtc,
   toStoreDate,
+  todayStoreDate,
 } from '../../common/utils/store-date.util.js';
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { roundMoney } from '../../common/utils/money.util.js';
+import { isWeightUom, weightKgFactor } from '../utils/product-uom.util.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
+import { FindProductMonthlyComparisonQueryDto } from '../dto/find-product-monthly-comparison-query.dto.js';
 import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-category-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
@@ -22,11 +28,13 @@ import {
   PaginatedOrdersDoc,
   PaymentMethodBucketDoc,
   PaymentMethodsSummaryDoc,
+  ProductMonthlyComparisonDoc,
   ReconciliationOrderDoc,
   ReconciliationStoreDoc,
   RefDoc,
   SalesOrderDoc,
   StoreDoc,
+  TopProductByWeightDoc,
   TopProductDoc,
 } from '../doc/sales.doc.js';
 
@@ -138,29 +146,51 @@ export class SalesService {
     };
   }
 
-  async findTopProducts(query: FindTopProductsQueryDto): Promise<TopProductDoc[]> {
-    const dateTo = query.dateTo ?? query.dateFrom;
+  // Trae órdenes + líneas de un rango en un solo viaje reutilizable — lo
+  // usan findTopProducts, findTopProductsByWeight y
+  // findProductMonthlyComparison. Si no hay órdenes, ni siquiera consulta
+  // líneas (ver el test que lo cubre).
+  private async fetchOrdersAndLines(
+    dateFrom: string,
+    dateTo: string,
+    posConfigId: number | undefined,
+    contextLabel: string,
+  ): Promise<{ orders: OdooPosOrder[]; lines: OdooPosOrderLine[] }> {
     const orders = await this.fetchAllPages(
       (options) => this.odooService.findPosOrders(options),
-      this.buildOrdersDomain(query.dateFrom, dateTo, query.posConfigId, {
-        excludeCancelled: true,
-      }),
-      'findTopProducts (órdenes)',
+      this.buildOrdersDomain(dateFrom, dateTo, posConfigId, { excludeCancelled: true }),
+      `${contextLabel} (órdenes)`,
     );
     if (orders.length === 0) {
-      return [];
+      return { orders, lines: [] };
     }
 
     const orderIds = orders.map((order) => order.id);
     const lines = await this.fetchAllPages(
       (options) => this.odooService.findPosOrderLines(options),
       [['order_id', 'in', orderIds]],
-      'findTopProducts (líneas)',
+      `${contextLabel} (líneas)`,
+    );
+    return { orders, lines };
+  }
+
+  async findTopProducts(query: FindTopProductsQueryDto): Promise<TopProductDoc[]> {
+    const dateTo = query.dateTo ?? query.dateFrom;
+    const { lines } = await this.fetchOrdersAndLines(
+      query.dateFrom,
+      dateTo,
+      query.posConfigId,
+      'findTopProducts',
     );
 
     const totalsByProduct = new Map<number, TopProductDoc>();
     for (const line of lines) {
       if (!line.product_id) continue;
+      // Productos a granel (UoM de peso, ej. "Crocks" en g/kg) tienen su
+      // propio ranking en findTopProductsByWeight — su `qty` no está en
+      // piezas, así que mezclarla aquí infla el ranking por unidades sin
+      // ser comparable al resto del catálogo (ver product-uom.util.ts).
+      if (isWeightUom(line.product_uom_id)) continue;
       const [productId, productName] = line.product_id;
       const existing = totalsByProduct.get(productId);
       if (existing) {
@@ -182,11 +212,52 @@ export class SalesService {
       .slice(0, query.limit);
   }
 
+  // Contraparte de findTopProducts para productos a granel: mismo rango y
+  // filtros, pero solo líneas cuya UoM es de peso, y ordenado/agregado por
+  // kilogramos en vez de piezas (siempre convertido a kg, sea cual sea la
+  // UoM nativa de la línea).
+  async findTopProductsByWeight(query: FindTopProductsQueryDto): Promise<TopProductByWeightDoc[]> {
+    const dateTo = query.dateTo ?? query.dateFrom;
+    const { lines } = await this.fetchOrdersAndLines(
+      query.dateFrom,
+      dateTo,
+      query.posConfigId,
+      'findTopProductsByWeight',
+    );
+
+    const totalsByProduct = new Map<number, TopProductByWeightDoc>();
+    for (const line of lines) {
+      if (!line.product_id) continue;
+      const factor = weightKgFactor(line.product_uom_id);
+      if (factor === null) continue; // no es un producto a granel
+
+      const [productId, productName] = line.product_id;
+      const kg = line.qty * factor;
+      const existing = totalsByProduct.get(productId);
+      if (existing) {
+        existing.totalKg += kg;
+        existing.totalRevenue += line.price_subtotal_incl;
+      } else {
+        totalsByProduct.set(productId, {
+          productId,
+          productName,
+          totalKg: kg,
+          totalRevenue: line.price_subtotal_incl,
+        });
+      }
+    }
+
+    const direction = query.order === 'asc' ? 1 : -1;
+    return [...totalsByProduct.values()]
+      .sort((a, b) => direction * (a.totalKg - b.totalKg))
+      .slice(0, query.limit);
+  }
+
   // Top N productos por INGRESOS dentro de cada categoría (product.category
-  // de Odoo). A diferencia de findTopProducts, acá NO se separan los
-  // productos a granel: el ingreso ($) es comparable entre un producto por
-  // pieza y uno por peso, así que conviven en el mismo ranking de su
-  // categoría sin necesitar una unidad común.
+  // de Odoo). A diferencia de findTopProducts/findTopProductsByWeight, acá
+  // NO se separan los productos a granel: el ingreso ($) es comparable
+  // entre un producto por pieza y uno por peso, así que conviven en el
+  // mismo ranking de su categoría sin necesitar una unidad común.
   //
   // pos.order.line no trae la categoría del producto — solo product_id
   // (id, nombre) — así que hace falta un segundo viaje a product.product
@@ -197,20 +268,11 @@ export class SalesService {
     query: FindTopProductsByCategoryQueryDto,
   ): Promise<CategoryTopProductsDoc[]> {
     const dateTo = query.dateTo ?? query.dateFrom;
-    const orders = await this.fetchAllPages(
-      (options) => this.odooService.findPosOrders(options),
-      this.buildOrdersDomain(query.dateFrom, dateTo, query.posConfigId, { excludeCancelled: true }),
-      'findTopProductsByCategory (órdenes)',
-    );
-    if (orders.length === 0) {
-      return [];
-    }
-
-    const orderIds = orders.map((order) => order.id);
-    const lines = await this.fetchAllPages(
-      (options) => this.odooService.findPosOrderLines(options),
-      [['order_id', 'in', orderIds]],
-      'findTopProductsByCategory (líneas)',
+    const { lines } = await this.fetchOrdersAndLines(
+      query.dateFrom,
+      dateTo,
+      query.posConfigId,
+      'findTopProductsByCategory',
     );
 
     interface ProductRevenue {
@@ -280,6 +342,97 @@ export class SalesService {
           .sort((a, b) => direction * (a.revenue - b.revenue))
           .slice(0, query.limit),
       }));
+  }
+
+  // Top N productos (por unidades del mes en curso) con su comparación
+  // contra el mes anterior COMPLETO — para el gráfico de "mes en curso
+  // arriba / mes anterior abajo" del dashboard de productos. Un solo viaje
+  // a Odoo que cubre ambos meses; cada orden se clasifica en su período por
+  // su día LOCAL de tienda (igual que el resto de /sales), y las líneas a
+  // granel se excluyen igual que en findTopProducts.
+  async findProductMonthlyComparison(
+    query: FindProductMonthlyComparisonQueryDto,
+  ): Promise<ProductMonthlyComparisonDoc[]> {
+    const today = query.referenceDate ?? todayStoreDate();
+    const currentMonthFrom = startOfMonth(today);
+    const currentMonthTo = today;
+    const previousMonthFrom = shiftMonthStart(currentMonthFrom, -1);
+    const previousMonthTo = endOfMonth(previousMonthFrom);
+
+    const { orders, lines } = await this.fetchOrdersAndLines(
+      previousMonthFrom,
+      currentMonthTo,
+      query.posConfigId,
+      'findProductMonthlyComparison',
+    );
+    if (orders.length === 0) {
+      return [];
+    }
+
+    type Period = 'current' | 'previous';
+    const periodByOrderId = new Map<number, Period>();
+    for (const order of orders) {
+      const storeDate = toStoreDate(order.date_order);
+      if (storeDate >= currentMonthFrom && storeDate <= currentMonthTo) {
+        periodByOrderId.set(order.id, 'current');
+      } else if (storeDate >= previousMonthFrom && storeDate <= previousMonthTo) {
+        periodByOrderId.set(order.id, 'previous');
+      }
+      // Fuera de ambos rangos no debería pasar: el domain ya pidió
+      // exactamente [previousMonthFrom, currentMonthTo].
+    }
+
+    interface ProductTotals {
+      productName: string;
+      quantity: number;
+      revenue: number;
+    }
+    const currentByProduct = new Map<number, ProductTotals>();
+    const previousByProduct = new Map<number, ProductTotals>();
+
+    for (const line of lines) {
+      if (!line.product_id || !line.order_id) continue;
+      if (isWeightUom(line.product_uom_id)) continue; // ver findTopProducts
+
+      const period = periodByOrderId.get(line.order_id[0]);
+      if (!period) continue;
+
+      const bucket = period === 'current' ? currentByProduct : previousByProduct;
+      const [productId, productName] = line.product_id;
+      const existing = bucket.get(productId);
+      if (existing) {
+        existing.quantity += line.qty;
+        existing.revenue += line.price_subtotal_incl;
+      } else {
+        bucket.set(productId, { productName, quantity: line.qty, revenue: line.price_subtotal_incl });
+      }
+    }
+
+    const productIds = new Set([...currentByProduct.keys(), ...previousByProduct.keys()]);
+    const rows: ProductMonthlyComparisonDoc[] = [...productIds].map((productId) => {
+      const current = currentByProduct.get(productId);
+      const previous = previousByProduct.get(productId);
+      return {
+        productId,
+        productName: current?.productName ?? previous?.productName ?? 'Desconocido',
+        currentMonth: {
+          dateFrom: currentMonthFrom,
+          dateTo: currentMonthTo,
+          quantity: current?.quantity ?? 0,
+          revenue: current?.revenue ?? 0,
+        },
+        previousMonth: {
+          dateFrom: previousMonthFrom,
+          dateTo: previousMonthTo,
+          quantity: previous?.quantity ?? 0,
+          revenue: previous?.revenue ?? 0,
+        },
+      };
+    });
+
+    return rows
+      .sort((a, b) => b.currentMonth.quantity - a.currentMonth.quantity)
+      .slice(0, query.limit);
   }
 
   // Ventas agregadas por día local de la tienda — para la gráfica de

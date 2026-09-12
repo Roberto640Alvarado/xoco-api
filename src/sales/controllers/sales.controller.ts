@@ -10,6 +10,7 @@ import { CustomerSearchService } from '../services/customer-search.service.js';
 import { FindCustomerSearchQueryDto } from '../dto/find-customer-search-query.dto.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
+import { FindProductMonthlyComparisonQueryDto } from '../dto/find-product-monthly-comparison-query.dto.js';
 import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-category-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
@@ -45,10 +46,37 @@ export class SalesController {
   @ApiOperation({
     summary: 'Top N productos más vendidos (por unidades) en un rango de fecha, por tienda',
     description:
-      'Ordenado por cantidad vendida descendente. Excluye órdenes canceladas. Sin posConfigId agrega todas las tiendas.',
+      'Ordenado por cantidad vendida descendente. Excluye órdenes canceladas y productos a granel (ver ' +
+      '/sales/top-products-by-weight) — su `qty` viene en gramos, no en piezas, y no es comparable al resto del ' +
+      'ranking. Sin posConfigId agrega todas las tiendas.',
   })
   findTopProducts(@Query() query: FindTopProductsQueryDto) {
     return this.salesService.findTopProducts(query);
+  }
+
+  @Get('top-products-by-weight')
+  @ApiOperation({
+    summary: 'Top N productos vendidos a granel (por Kg) en un rango de fecha, por tienda',
+    description:
+      'Misma forma que /sales/top-products, pero solo para productos cuya unidad de medida en Odoo es de peso ' +
+      '(ej. "Crocks" y similares) — se agregan y ordenan por kilogramos vendidos (ya convertido, sea cual sea la ' +
+      'UoM nativa de la línea), no por unidades. Excluye órdenes canceladas.',
+  })
+  findTopProductsByWeight(@Query() query: FindTopProductsQueryDto) {
+    return this.salesService.findTopProductsByWeight(query);
+  }
+
+  @Get('product-monthly-comparison')
+  @ApiOperation({
+    summary: 'Compara, por producto, unidades e ingreso del mes en curso contra el mes anterior completo',
+    description:
+      'Top N de productos por unidades vendidas en lo que va del mes en curso (día 1 hasta hoy, hora local de la ' +
+      'tienda), con sus unidades e ingreso del mes anterior COMPLETO al lado — pensado para graficar ambos meses ' +
+      'juntos por producto. Mismo criterio de "producto" que /sales/top-products (excluye los que se venden a ' +
+      'granel — ver /sales/top-products-by-weight).',
+  })
+  findProductMonthlyComparison(@Query() query: FindProductMonthlyComparisonQueryDto) {
+    return this.salesService.findProductMonthlyComparison(query);
   }
 
   @Get('top-products-by-category')

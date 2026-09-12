@@ -40,6 +40,34 @@ export interface TopProductDoc {
   totalRevenue: number;
 }
 
+// Ranking aparte para productos a granel (ver product-uom.util.ts):
+// "totalKg" ya viene convertido a kilogramos, sea cual sea la UoM nativa
+// de la línea en Odoo (gramos, libras, etc.) — nunca gramos crudos.
+export interface TopProductByWeightDoc {
+  productId: number;
+  productName: string;
+  totalKg: number;
+  totalRevenue: number;
+}
+
+// Un período (mes en curso o mes anterior) dentro de la comparación
+// mensual por producto. `dateFrom`/`dateTo` son el rango local de tienda
+// que efectivamente se agregó, para que el frontend pueda mostrarlo
+// (ej. "1-12 sep" vs. "1-30 ago") sin tener que recalcularlo.
+export interface ProductMonthPeriodDoc {
+  dateFrom: string;
+  dateTo: string;
+  quantity: number;
+  revenue: number;
+}
+
+export interface ProductMonthlyComparisonDoc {
+  productId: number;
+  productName: string;
+  currentMonth: ProductMonthPeriodDoc;
+  previousMonth: ProductMonthPeriodDoc;
+}
+
 // Un producto dentro del top de su categoría — ver findTopProductsByCategory.
 // Se ordena por ingresos ($), no por unidades: a diferencia de
 // /sales/top-products, acá SÍ conviven productos por pieza y a granel

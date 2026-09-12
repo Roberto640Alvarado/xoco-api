@@ -71,3 +71,37 @@ export function enumerateDates(dateFrom: string, dateTo: string): string[] {
   }
   return dates;
 }
+
+// "Hoy" en el día local de la tienda — mismo offset fijo que el resto de
+// este archivo (ver STORE_UTC_OFFSET_HOURS). Lo usan los reportes que
+// necesitan saber en qué mes/día local estamos parados ahora mismo (ej.
+// la comparación "mes en curso vs. mes anterior" de /sales/product-monthly-comparison).
+export function todayStoreDate(): string {
+  return new Date(Date.now() + STORE_UTC_OFFSET_HOURS * MS_PER_HOUR)
+    .toISOString()
+    .slice(0, 10);
+}
+
+// "2026-09-07" -> "2026-09-01".
+export function startOfMonth(date: string): string {
+  return `${date.slice(0, 7)}-01`;
+}
+
+// Cualquier día de septiembre 2026 -> "2026-09-30" (respeta meses de 28-31
+// días y años bisiestos).
+export function endOfMonth(date: string): string {
+  const [year, month] = date.slice(0, 7).split('-').map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${date.slice(0, 7)}-${String(lastDay).padStart(2, '0')}`;
+}
+
+// Mueve una fecha `months` meses (negativo = hacia atrás), fijando el
+// resultado al día 1 de ese mes. Pensado para usarse junto con
+// `startOfMonth` (ej. `shiftMonthStart(startOfMonth(today), -1)` para el
+// día 1 del mes anterior) — no preserva el día del mes original.
+export function shiftMonthStart(date: string, months: number): string {
+  const [year, month] = date.slice(0, 7).split('-').map(Number);
+  const cursor = new Date(Date.UTC(year, month - 1 + months, 1));
+  return `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}-01`;
+}
+
