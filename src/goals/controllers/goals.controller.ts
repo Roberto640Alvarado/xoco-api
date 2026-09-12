@@ -19,7 +19,7 @@ export class GoalsController {
   @ApiOperation({
     summary: 'Meta (derivada del mes anterior), avance real y proyección de cierre por tienda, para un mes dado.',
     description:
-      'Trae las órdenes reales del mes en curso y del mes anterior desde Odoo (vía el mismo agregado que usa Visitas) y calcula "Meta del mes" = real del mes anterior * (1 + % guardado). En el mes en curso, "real" es hasta ayer y se agrega una proyección de cierre por ritmo diario.',
+      'Trae las visitas reales del mes en curso y del mes anterior desde Odoo (cantidad de FACTURAS por tienda) y calcula "Meta del mes" = real del mes anterior * (1 + % guardado). En el mes en curso, "real" es hasta ayer y se agrega una proyección de cierre por ritmo diario.',
   })
   getSummary(@Query() query: FindGoalsSummaryQueryDto) {
     return this.goalsService.getSummary(query);

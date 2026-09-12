@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SalesService } from '../../sales/services/sales.service.js';
+import { StoreInvoiceTotalsService } from '../../sales/services/store-invoice-totals.service.js';
 import { TicketGoalsRepository } from '../repositories/ticket-goals.repository.js';
 import { UpsertTicketGoalsBulkDto } from '../dto/upsert-ticket-goals-bulk.dto.js';
 import { FindTicketGoalsSummaryQueryDto } from '../dto/find-ticket-goals-summary-query.dto.js';
@@ -30,9 +31,15 @@ function goalKey(posConfigId: number, year: number, month: number): string {
 const MAX_CHAIN_DEPTH = 24;
 
 // Módulo "Ticket Promedio": mismo diseño que GoalsService/
-// SalesGoalsService, pero la métrica es venta / cantidad de órdenes
-// (ticket promedio) en vez de una de esas dos por separado, con su propio
-// % de crecimiento guardado aparte (StoreTicketGoal) — ver plan-history.
+// SalesGoalsService, pero la métrica es venta / visitas (ticket promedio)
+// en vez de una de esas dos por separado, con su propio % de crecimiento
+// guardado aparte (StoreTicketGoal) — ver plan-history.
+//
+// Las dos partes de la división salen de las FACTURAS de cada tienda
+// (vía StoreInvoiceTotalsService), igual que Visitas y Venta Mensual —
+// así el ticket promedio del panel es exactamente venta/visitas de lo que
+// muestran esos dos módulos, y no una mezcla de dos fuentes. Ver
+// plan-history "visitas-por-vendedor-facturas".
 @Injectable()
 export class TicketGoalsService {
   private readonly logger = new Logger(TicketGoalsService.name);
@@ -40,6 +47,7 @@ export class TicketGoalsService {
   constructor(
     private readonly ticketGoalsRepository: TicketGoalsRepository,
     private readonly salesService: SalesService,
+    private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
   ) {}
 
   async upsertBulk(dto: UpsertTicketGoalsBulkDto): Promise<StoreTicketGoalDoc[]> {
@@ -62,31 +70,46 @@ export class TicketGoalsService {
     }));
   }
 
-  // Ticket promedio real (venta real / cantidad de órdenes reales) de una
-  // tienda en un mes completo — cacheado por (tienda, año, mes) dentro de
-  // una sola llamada a getSummary(). 0 si no hubo órdenes en el mes (evita
-  // dividir entre cero).
+  // Ticket promedio real (venta facturada / visitas) de cada tienda en un
+  // rango. Cacheado por rango dentro de una sola llamada a getSummary():
+  // la atribución de facturas a tienda se resuelve de una vez para las
+  // cuatro (mismo patrón que GoalsService). Una tienda sin visitas queda
+  // en 0 — no se divide entre cero.
+  private getAverageTicketForRange(
+    dateFrom: string,
+    dateTo: string,
+    cache: Map<string, Promise<Map<number, number>>>,
+  ): Promise<Map<number, number>> {
+    const key = `${dateFrom}:${dateTo}`;
+    let cached = cache.get(key);
+    if (!cached) {
+      cached = this.storeInvoiceTotalsService.findTotalsByStore({ dateFrom, dateTo }).then(
+        (report) =>
+          new Map(
+            report.items.map((item) => [
+              item.posConfigId,
+              item.visits > 0 ? item.amountTotal / item.visits : 0,
+            ]),
+          ),
+      );
+      cache.set(key, cached);
+    }
+    return cached;
+  }
+
+  // Ticket promedio real de una tienda en un mes completo.
   private async getActualAverageTicketForMonth(
     posConfigId: number,
     year: number,
     month: number,
-    cache: Map<string, Promise<number>>,
+    cache: Map<string, Promise<Map<number, number>>>,
   ): Promise<number> {
-    const key = goalKey(posConfigId, year, month);
-    let cached = cache.get(key);
-    if (!cached) {
-      const dateFrom = toIsoDate(year, month, 1);
-      const dateTo = toIsoDate(year, month, daysInMonthOf(year, month));
-      cached = this.salesService.findDailySummary({ dateFrom, dateTo, posConfigId }).then((days) => {
-        const totals = days.reduce(
-          (acc, day) => ({ orders: acc.orders + day.orderCount, revenue: acc.revenue + day.totalRevenue }),
-          { orders: 0, revenue: 0 },
-        );
-        return totals.orders > 0 ? totals.revenue / totals.orders : 0;
-      });
-      cache.set(key, cached);
-    }
-    return cached;
+    const tickets = await this.getAverageTicketForRange(
+      toIsoDate(year, month, 1),
+      toIsoDate(year, month, daysInMonthOf(year, month)),
+      cache,
+    );
+    return tickets.get(posConfigId) ?? 0;
   }
 
   // "Meta" (ticket promedio) encadenada mes a mes: meta(mes N) = meta(mes
@@ -101,7 +124,7 @@ export class TicketGoalsService {
     month: number,
     growthByKey: Map<string, number>,
     targetMemo: Map<string, Promise<number | null>>,
-    actualTicketCache: Map<string, Promise<number>>,
+    actualTicketCache: Map<string, Promise<Map<number, number>>>,
     depth: number,
   ): Promise<number | null> {
     const key = goalKey(posConfigId, year, month);
@@ -171,23 +194,29 @@ export class TicketGoalsService {
       growthByKey.set(goalKey(goal.posConfigId, goal.year, goal.month), goal.growthPercent);
     }
 
-    const actualTicketCache = new Map<string, Promise<number>>();
+    const actualTicketCache = new Map<string, Promise<Map<number, number>>>();
     const targetMemo = new Map<string, Promise<number | null>>();
+
+    // El ticket del mes en curso se resuelve de una sola vez para todas
+    // las tiendas (la atribución de facturas es global, no por tienda).
+    const currentTickets =
+      dateTo === null
+        ? new Map<number, number>()
+        : await this.getAverageTicketForRange(dateFrom, dateTo, actualTicketCache);
 
     return Promise.all(
       stores.map(async (store) => {
-        const [currentMonthDays, targetAverageTicket] = await Promise.all([
-          dateTo === null
-            ? Promise.resolve([])
-            : this.salesService.findDailySummary({ dateFrom, dateTo, posConfigId: store.id }),
-          this.resolveTargetAverageTicket(store.id, year, month, growthByKey, targetMemo, actualTicketCache, 0),
-        ]);
-
-        const currentTotals = currentMonthDays.reduce(
-          (acc, day) => ({ orders: acc.orders + day.orderCount, revenue: acc.revenue + day.totalRevenue }),
-          { orders: 0, revenue: 0 },
+        const targetAverageTicket = await this.resolveTargetAverageTicket(
+          store.id,
+          year,
+          month,
+          growthByKey,
+          targetMemo,
+          actualTicketCache,
+          0,
         );
-        const actualAverageTicket = currentTotals.orders > 0 ? currentTotals.revenue / currentTotals.orders : 0;
+
+        const actualAverageTicket = currentTickets.get(store.id) ?? 0;
         const growthPercent = growthByKey.get(goalKey(store.id, year, month)) ?? null;
 
         const reachPercent = targetAverageTicket ? actualAverageTicket / targetAverageTicket : null;

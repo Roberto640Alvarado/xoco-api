@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SalesService } from '../../sales/services/sales.service.js';
+import { StoreInvoiceTotalsService } from '../../sales/services/store-invoice-totals.service.js';
 import { GoalsRepository } from '../repositories/goals.repository.js';
 import { UpsertGoalsBulkDto } from '../dto/upsert-goals-bulk.dto.js';
 import { FindGoalsSummaryQueryDto } from '../dto/find-goals-summary-query.dto.js';
@@ -41,6 +42,7 @@ export class GoalsService {
   constructor(
     private readonly goalsRepository: GoalsRepository,
     private readonly salesService: SalesService,
+    private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
   ) {}
 
   async upsertBulk(dto: UpsertGoalsBulkDto): Promise<StoreGoalDoc[]> {
@@ -63,28 +65,41 @@ export class GoalsService {
     }));
   }
 
-  // Total real de órdenes (mismo agregado que usa Visitas, vía
-  // SalesService) de una tienda en un mes completo. Cacheado por
-  // (tienda, año, mes) dentro de una sola llamada a getSummary(), porque
-  // tanto "previousMonthActualOrders" (informativo) como el fallback de
-  // la cadena de metas pueden pedir el mismo mes.
+  // Visitas reales de TODAS las tiendas en un rango, contando facturas
+  // (ver StoreInvoiceTotalsService). Cacheado por rango dentro de una sola
+  // llamada a getSummary(): la atribución de facturas a tienda se resuelve
+  // de una vez para las cuatro tiendas, así que se pide por rango y no
+  // por tienda — y tanto "previousMonthActualOrders" como el fallback de
+  // la cadena de metas suelen pedir el mismo rango.
+  private getVisitsForRange(
+    dateFrom: string,
+    dateTo: string,
+    cache: Map<string, Promise<Map<number, number>>>,
+  ): Promise<Map<number, number>> {
+    const key = `${dateFrom}:${dateTo}`;
+    let cached = cache.get(key);
+    if (!cached) {
+      cached = this.storeInvoiceTotalsService
+        .findTotalsByStore({ dateFrom, dateTo })
+        .then((report) => new Map(report.items.map((item) => [item.posConfigId, item.visits])));
+      cache.set(key, cached);
+    }
+    return cached;
+  }
+
+  // Visitas reales de una tienda en un mes completo.
   private async getActualOrdersForMonth(
     posConfigId: number,
     year: number,
     month: number,
-    cache: Map<string, Promise<number>>,
+    cache: Map<string, Promise<Map<number, number>>>,
   ): Promise<number> {
-    const key = goalKey(posConfigId, year, month);
-    let cached = cache.get(key);
-    if (!cached) {
-      const dateFrom = toIsoDate(year, month, 1);
-      const dateTo = toIsoDate(year, month, daysInMonthOf(year, month));
-      cached = this.salesService
-        .findDailySummary({ dateFrom, dateTo, posConfigId })
-        .then((days) => days.reduce((sum, day) => sum + day.orderCount, 0));
-      cache.set(key, cached);
-    }
-    return cached;
+    const visits = await this.getVisitsForRange(
+      toIsoDate(year, month, 1),
+      toIsoDate(year, month, daysInMonthOf(year, month)),
+      cache,
+    );
+    return visits.get(posConfigId) ?? 0;
   }
 
   // "Meta del mes" (targetOrders) se calcula encadenada: la meta del mes N
@@ -104,7 +119,7 @@ export class GoalsService {
     month: number,
     growthByKey: Map<string, number>,
     targetMemo: Map<string, Promise<number | null>>,
-    actualOrdersCache: Map<string, Promise<number>>,
+    actualOrdersCache: Map<string, Promise<Map<number, number>>>,
     depth: number,
   ): Promise<number | null> {
     const key = goalKey(posConfigId, year, month);
@@ -145,11 +160,11 @@ export class GoalsService {
     return compute;
   }
 
-  // Combina el % de crecimiento guardado (Mongo, historial completo) con lo
-  // real de Odoo (vía SalesService, mismo agregado que usa Visitas) para
-  // cada tienda activa. "Meta del mes" se encadena mes a mes (ver
-  // resolveTargetOrders) — nunca se deriva directo del total real del mes
-  // anterior.
+  // Combina el % de crecimiento guardado (Mongo, historial completo) con
+  // las visitas reales de Odoo (vía StoreInvoiceTotalsService: cantidad de
+  // FACTURAS atribuidas a cada tienda) para cada tienda activa. "Meta del
+  // mes" se encadena mes a mes (ver resolveTargetOrders) — nunca se
+  // deriva directo del total real del mes anterior.
   async getSummary(query: FindGoalsSummaryQueryDto): Promise<GoalSummaryItemDoc[]> {
     const { year, month } = query;
 
@@ -191,23 +206,26 @@ export class GoalsService {
     }
 
     // Caches compartidos entre tiendas para esta sola consulta: evitan
-    // repetir un findDailySummary de Odoo para el mismo (tienda, mes) tanto
-    // al resolver la cadena de metas como al mostrar
-    // "previousMonthActualOrders".
-    const actualOrdersCache = new Map<string, Promise<number>>();
+    // repetirle a Odoo el mismo rango tanto al resolver la cadena de metas
+    // como al mostrar "previousMonthActualOrders".
+    const actualOrdersCache = new Map<string, Promise<Map<number, number>>>();
     const targetMemo = new Map<string, Promise<number | null>>();
+
+    // Las visitas del mes en curso se resuelven de una sola vez para todas
+    // las tiendas (la atribución de facturas es global, no por tienda).
+    const currentVisits =
+      dateTo === null
+        ? new Map<number, number>()
+        : await this.getVisitsForRange(dateFrom, dateTo, actualOrdersCache);
 
     return Promise.all(
       stores.map(async (store) => {
-        const [currentMonthDays, previousMonthActualOrders, targetOrders] = await Promise.all([
-          dateTo === null
-            ? Promise.resolve([])
-            : this.salesService.findDailySummary({ dateFrom, dateTo, posConfigId: store.id }),
+        const [previousMonthActualOrders, targetOrders] = await Promise.all([
           this.getActualOrdersForMonth(store.id, prev.year, prev.month, actualOrdersCache),
           this.resolveTargetOrders(store.id, year, month, growthByKey, targetMemo, actualOrdersCache, 0),
         ]);
 
-        const actualOrders = currentMonthDays.reduce((sum, day) => sum + day.orderCount, 0);
+        const actualOrders = currentVisits.get(store.id) ?? 0;
         const growthPercent = growthByKey.get(goalKey(store.id, year, month)) ?? null;
 
         const reachPercent = targetOrders ? actualOrders / targetOrders : null;

@@ -20,6 +20,19 @@ export interface OdooSearchReadOptions {
   order?: string;
 }
 
+// Opciones de `read_group`: Odoo agrega del lado del servidor (SUM por
+// defecto en los campos monetarios/numéricos) y devuelve una fila por
+// grupo con `__count`. Se usa cuando lo único que hace falta es el
+// agregado, para no traerse miles de registros y sumarlos aquí.
+export interface OdooReadGroupOptions {
+  domain?: unknown[];
+  // Campos a agregar. Van sin el registro completo: solo los que Odoo
+  // pueda sumar/contar.
+  fields: string[];
+  groupby: string[];
+  orderby?: string;
+}
+
 // Forma cruda que devuelve Odoo por JSON-RPC.
 export interface OdooJsonRpcSuccess<T> {
   jsonrpc: '2.0';

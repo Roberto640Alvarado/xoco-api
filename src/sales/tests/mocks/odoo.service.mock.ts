@@ -1,10 +1,16 @@
 import { Mock, vi } from 'vitest';
 import { OdooService } from '../../../odoo/services/odoo.service.js';
 import {
+  OdooAccountMove,
+  OdooAccountMoveGroup,
   OdooPosConfig,
   OdooPosOrder,
+  OdooPosOrderGroup,
   OdooPosOrderLine,
+  OdooPosPaymentGroup,
+  OdooPosPaymentMethod,
   OdooPosSession,
+  OdooProduct,
 } from '../../../odoo/types/odoo-entities.types.js';
 
 export interface OdooServiceMock {
@@ -13,7 +19,13 @@ export interface OdooServiceMock {
   findPosOrderLines: Mock;
   findPosSessions: Mock;
   findPosConfigs: Mock;
+  findProducts: Mock;
+  findPosPaymentMethods: Mock;
   countPosOrders: Mock;
+  findAccountMoves: Mock;
+  readGroupAccountMoves: Mock;
+  readGroupPosOrders: Mock;
+  readGroupPosPayments: Mock;
 }
 
 export interface OdooServiceMockData {
@@ -21,6 +33,12 @@ export interface OdooServiceMockData {
   lines?: OdooPosOrderLine[];
   sessions?: OdooPosSession[];
   configs?: OdooPosConfig[];
+  products?: OdooProduct[];
+  paymentMethods?: OdooPosPaymentMethod[];
+  moves?: OdooAccountMove[];
+  moveGroups?: OdooAccountMoveGroup[];
+  orderGroups?: OdooPosOrderGroup[];
+  paymentGroups?: OdooPosPaymentGroup[];
 }
 
 // Doble de OdooService que devuelve siempre el mismo conjunto de
@@ -35,7 +53,13 @@ export function createOdooServiceMock(data: OdooServiceMockData = {}): OdooServi
     findPosOrderLines: vi.fn().mockResolvedValue(data.lines ?? []),
     findPosSessions: vi.fn().mockResolvedValue(data.sessions ?? []),
     findPosConfigs: vi.fn().mockResolvedValue(data.configs ?? []),
+    findProducts: vi.fn().mockResolvedValue(data.products ?? []),
+    findPosPaymentMethods: vi.fn().mockResolvedValue(data.paymentMethods ?? []),
     countPosOrders: vi.fn().mockResolvedValue(orders.length),
+    findAccountMoves: vi.fn().mockResolvedValue(data.moves ?? []),
+    readGroupAccountMoves: vi.fn().mockResolvedValue(data.moveGroups ?? []),
+    readGroupPosOrders: vi.fn().mockResolvedValue(data.orderGroups ?? []),
+    readGroupPosPayments: vi.fn().mockResolvedValue(data.paymentGroups ?? []),
   };
 
   return { ...mock, service: mock as unknown as OdooService };

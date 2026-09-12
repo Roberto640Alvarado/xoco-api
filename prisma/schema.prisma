@@ -91,6 +91,24 @@ model StoreSalesGoal {
   @@map("store_sales_goals")
 }
 
+// % de crecimiento mensual de venta ($ facturado) por CLIENTE DE MAYOREO
+// (Selectos, Operadora del Sur — ver src/sales/constants/wholesale-clients.const.ts).
+// Mismo mecanismo que StoreSalesGoal, pero `clientKey` en vez de
+// `posConfigId`: no son pos.config de Odoo, son cuentas de mayoreo fijas
+// que se facturan sin pasar por caja (ver WholesaleClientTotalsService).
+model WholesaleClientGoal {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientKey      String
+  year           Int
+  month          Int
+  growthPercent  Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([clientKey, year, month])
+  @@map("wholesale_client_goals")
+}
+
 // % de crecimiento mensual del TICKET PROMEDIO (venta / cantidad de
 // órdenes) por tienda — mismo mecanismo que StoreGoal/StoreSalesGoal
 // (arriba), pero para esta tercera métrica. % PROPIO e independiente de
