@@ -243,6 +243,51 @@ describe('SalesService', () => {
       const asc = await service.findTopProducts({ dateFrom: SEPT_7, limit: 10, order: 'asc' });
       expect(asc.map((product) => product.productName)).toEqual(['Americano', 'Trufa Leche']);
     });
+
+    it('excluye del ranking los productos a granel (UoM de peso) — no son comparables a piezas', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        lines: [
+          lineOf(1, 33617, [10, 'Trufa Leche'], 2, 1.77),
+          // 500 g de "Crocks" no son 500 piezas: si esto contara como
+          // unidades, "ganaría" el ranking sin ser comparable.
+          lineOf(2, 33618, [12, 'Crocks Chocolate'], 500, 10, GRAMOS),
+        ],
+      });
+      const service = new SalesService(odoo.service);
+
+      const products = await service.findTopProducts({ dateFrom: SEPT_7, limit: 10, order: 'desc' });
+
+      expect(products.map((product) => product.productName)).toEqual(['Trufa Leche']);
+    });
+  });
+
+  describe('findTopProductsByWeight', () => {
+    it('agrega y ordena por Kg solo los productos a granel, convirtiendo la UoM nativa de cada línea', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        lines: [
+          // No es a granel: no debe aparecer en este ranking.
+          lineOf(1, 33617, [10, 'Trufa Leche'], 2, 1.77),
+          // 500 g + 250 g del mismo producto = 0.75 kg.
+          lineOf(2, 33618, [12, 'Crocks Chocolate'], 500, 10, GRAMOS),
+          lineOf(3, 33619, [12, 'Crocks Chocolate'], 250, 5, GRAMOS),
+          // Ya viene en kg: 2 kg tal cual (factor 1).
+          lineOf(4, 33617, [13, 'Almendras Garrapiñadas'], 2, 8, KILOGRAMOS),
+        ],
+      });
+      const service = new SalesService(odoo.service);
+
+      const products = await service.findTopProductsByWeight({ dateFrom: SEPT_7, limit: 10, order: 'desc' });
+
+      expect(products.map((product) => product.productName)).toEqual([
+        'Almendras Garrapiñadas',
+        'Crocks Chocolate',
+      ]);
+      expect(products[0]).toMatchObject({ totalKg: 2, totalRevenue: 8 });
+      expect(products[1].totalKg).toBeCloseTo(0.75, 5);
+      expect(products[1].totalRevenue).toBeCloseTo(15, 5);
+    });
   });
 
   describe('findTopProductsByCategory', () => {
@@ -252,7 +297,9 @@ describe('SalesService', () => {
         lines: [
           lineOf(1, 33617, [10, 'Trufa Leche'], 2, 20),
           lineOf(2, 33618, [11, 'Americano'], 1, 5),
-          lineOf(3, 33619, [12, 'Crocks Chocolate'], 500, 30),
+          // A granel: NO se excluye acá (a diferencia de findTopProducts),
+          // porque el ranking es por ingresos, no por unidades.
+          lineOf(3, 33619, [12, 'Crocks Chocolate'], 500, 30, GRAMOS),
         ],
         products: [
           productOf(10, [100, 'Bombones']),
@@ -316,6 +363,57 @@ describe('SalesService', () => {
     });
   });
 
+  describe('findProductMonthlyComparison', () => {
+    it('separa cada orden en mes en curso / mes anterior por su día local, y excluye a granel', async () => {
+      odoo = createOdooServiceMock({
+        orders: [
+          monthlyOrder(1, '2026-09-07 18:00:00'), // día local 2026-09-07 -> mes en curso
+          monthlyOrder(2, '2026-08-15 18:00:00'), // día local 2026-08-15 -> mes anterior
+          // Fuera de la ventana pedida (previousMonthFrom..currentMonthTo);
+          // el mock no filtra por domain, así que esto prueba que el
+          // bucketing por fecha (no el domain) es lo que lo excluye.
+          monthlyOrder(3, '2026-07-01 18:00:00'),
+        ],
+        lines: [
+          lineOf(1, 1, [10, 'Trufa Leche'], 4, 3.54),
+          lineOf(2, 2, [10, 'Trufa Leche'], 6, 5.31),
+          lineOf(3, 2, [11, 'Americano'], 1, 1.99),
+          lineOf(4, 3, [10, 'Trufa Leche'], 100, 88.5), // julio: no debe sumar a ningún mes
+          lineOf(5, 1, [12, 'Crocks Chocolate'], 500, 10, GRAMOS), // a granel: excluido
+        ],
+      });
+      const service = new SalesService(odoo.service);
+
+      const rows = await service.findProductMonthlyComparison({
+        posConfigId: RAMBLAS_ID,
+        limit: 10,
+        referenceDate: '2026-09-12',
+      });
+
+      expect(rows.map((row) => row.productName)).toEqual(['Trufa Leche', 'Americano']);
+
+      const trufa = rows.find((row) => row.productId === 10)!;
+      expect(trufa.currentMonth).toMatchObject({
+        dateFrom: '2026-09-01',
+        dateTo: '2026-09-12',
+        quantity: 4,
+        revenue: 3.54,
+      });
+      expect(trufa.previousMonth).toMatchObject({
+        dateFrom: '2026-08-01',
+        dateTo: '2026-08-31',
+        quantity: 6,
+        revenue: 5.31,
+      });
+
+      const americano = rows.find((row) => row.productId === 11)!;
+      expect(americano.currentMonth).toMatchObject({ quantity: 0, revenue: 0 });
+      expect(americano.previousMonth).toMatchObject({ quantity: 1, revenue: 1.99 });
+
+      expect(rows.some((row) => row.productId === 12)).toBe(false);
+    });
+  });
+
   describe('getReconciliation', () => {
     it('separa el método actual del anterior y lista las órdenes donde difieren', async () => {
       odoo = createOdooServiceMock({
@@ -372,11 +470,13 @@ function lineOf(
   product: [number, string],
   qty: number,
   subtotalIncl: number,
+  uom: [number, string] | false = false,
 ) {
   return {
     id,
     order_id: [orderId, `Ramblas/${orderId}`] as [number, string],
     product_id: product,
+    product_uom_id: uom,
     qty,
     price_unit: subtotalIncl / qty,
     price_subtotal: subtotalIncl,
@@ -387,6 +487,11 @@ function lineOf(
     write_date: '2026-09-07 18:41:25',
   };
 }
+
+// Producto a granel: en Odoo su UoM es "g" — 500 en `qty` son 500 GRAMOS,
+// no 500 piezas (ver src/sales/utils/product-uom.util.ts).
+const GRAMOS: [number, string] = [5, 'g'];
+const KILOGRAMOS: [number, string] = [6, 'kg'];
 
 // product.product mínimo para findTopProductsByCategory — solo lleva los
 // campos que ese método de verdad usa (id, categ_id); el resto son
@@ -407,5 +512,25 @@ function productOf(id: number, categ: [number, string]): import('../../odoo/type
     product_tmpl_id: [id, `Producto ${id}`],
     create_date: '2026-09-07 18:41:25',
     write_date: '2026-09-07 18:41:25',
+  };
+}
+
+function monthlyOrder(id: number, dateOrder: string): import('../../odoo/types/odoo-entities.types.js').OdooPosOrder {
+  return {
+    id,
+    name: `Ramblas/${id}`,
+    session_id: [9000, 'POS/09000'],
+    config_id: [RAMBLAS_ID, 'Tienda Ramblas'],
+    partner_id: false,
+    date_order: dateOrder,
+    state: 'invoiced',
+    amount_total: 0,
+    amount_tax: 0,
+    amount_paid: 0,
+    amount_return: 0,
+    user_id: false,
+    company_id: [1, 'Xocolatísimo'],
+    create_date: dateOrder,
+    write_date: dateOrder,
   };
 }

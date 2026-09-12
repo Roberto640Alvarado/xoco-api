@@ -6,6 +6,7 @@ Este archivo proporciona lineamientos para Claude Code (claude.ai/code) al traba
 
 - Nunca incluir "Co-Authored-By", "Anthropic", "Claude" o "Claude Code" en mensajes de commit ni en ninguna salida relacionada con Git.
 - Cada vez que completes un task, muestra un emoji de cohete 🚀 al final del mensaje.
+- No releer ni listar automáticamente el contenido de `plan-history/` al iniciar una tarea — solo consultarla si el usuario lo pide explícitamente.
 
 ---
 
