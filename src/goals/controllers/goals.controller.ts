@@ -19,7 +19,7 @@ export class GoalsController {
   constructor(private readonly goalsService: GoalsService) {}
 
   @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
-  @RequiresModule('dashboard.trafico-tiendas')
+  @RequiresModule('dashboard.trafico-tiendas', 'dashboard.trafico-diario')
   @Get('summary')
   @ApiOperation({
     summary: 'Meta (derivada del mes anterior), avance real y proyección de cierre por tienda, para un mes dado.',

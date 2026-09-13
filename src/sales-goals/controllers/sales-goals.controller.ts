@@ -20,7 +20,7 @@ export class SalesGoalsController {
   constructor(private readonly salesGoalsService: SalesGoalsService) {}
 
   @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
-  @RequiresModule('dashboard.venta-mensual')
+  @RequiresModule('dashboard.venta-mensual', 'dashboard.venta-diaria')
   @Get('summary')
   @ApiOperation({
     summary: 'Meta de venta ($, encadenada mes a mes), avance real y valor pendiente por tienda, para un mes dado.',

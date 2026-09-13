@@ -19,7 +19,7 @@ export class TicketGoalsController {
   constructor(private readonly ticketGoalsService: TicketGoalsService) {}
 
   @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
-  @RequiresModule('dashboard.ticket-promedio')
+  @RequiresModule('dashboard.ticket-promedio', 'dashboard.ticket-detallado')
   @Get('summary')
   @ApiOperation({
     summary: 'Meta de ticket promedio (encadenada mes a mes), real y diferencia por tienda, para un mes dado.',
