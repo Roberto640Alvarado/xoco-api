@@ -73,10 +73,18 @@ export interface ProductMonthlyComparisonDoc {
 // /sales/top-products, acá SÍ conviven productos por pieza y a granel
 // (ej. "Crocks") en el mismo ranking, porque el ingreso es comparable
 // entre ambos sin necesitar convertir a una unidad común.
+// `unit` refleja la UoM real de venta de ESE producto (nunca mezclada):
+// 'kg' para productos a granel (ej. Crocks, ver product-uom.util.ts),
+// 'unidad' para el resto. `quantity` viene en esa unidad — no es
+// comparable entre productos con `unit` distinto (ver findTopProductsByCategory).
+export type CategoryProductUnit = 'unidad' | 'kg';
+
 export interface CategoryProductDoc {
   productId: number;
   productName: string;
   revenue: number;
+  quantity: number;
+  unit: CategoryProductUnit;
 }
 
 export interface CategoryTopProductsDoc {

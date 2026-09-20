@@ -98,12 +98,14 @@ export class SalesController {
   @RequiresModule('dashboard.categorias')
   @Get('top-products-by-category')
   @ApiOperation({
-    summary: 'Top N productos por ingresos DENTRO DE CADA CATEGORÍA (product.category de Odoo), en un rango de fecha, por tienda',
+    summary: 'Top N productos DENTRO DE CADA CATEGORÍA (product.category de Odoo), en un rango de fecha, por tienda',
     description:
-      'Categorías ordenadas por su venta total (mayor primero); dentro de cada una, sus productos ordenados por ' +
-      'ingresos ($). A diferencia de /sales/top-products, acá NO se excluyen los productos a granel (ej. Crocks): ' +
-      'el ingreso es comparable entre un producto por pieza y uno por peso, así que conviven en el ranking de su ' +
-      'categoría. Excluye órdenes canceladas. Sin posConfigId agrega todas las tiendas.',
+      'Categorías siempre ordenadas por su venta total en ingresos (mayor primero); dentro de cada una, sus ' +
+      'productos ordenados por `metric` (ingresos por default, o cantidad — ver query param). A diferencia de ' +
+      '/sales/top-products, acá NO se excluyen los productos a granel (ej. Crocks): por ingresos son comparables ' +
+      'entre un producto por pieza y uno por peso, así que conviven en el ranking de su categoría; por cantidad ' +
+      'cada producto trae su propia unidad (`unit`: "unidad" o "kg"). Excluye órdenes canceladas. Sin posConfigId ' +
+      'agrega todas las tiendas.',
   })
   findTopProductsByCategory(@Query() query: FindTopProductsByCategoryQueryDto, @User() user: AuthenticatedUser) {
     query.posConfigId = scopedPosConfigId(user, query.posConfigId);

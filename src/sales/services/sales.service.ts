@@ -23,6 +23,7 @@ import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-c
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
 import {
+  CategoryProductDoc,
   CategoryTopProductsDoc,
   DailySalesDoc,
   PaginatedOrdersDoc,
@@ -253,11 +254,14 @@ export class SalesService {
       .slice(0, query.limit);
   }
 
-  // Top N productos por INGRESOS dentro de cada categoría (product.category
-  // de Odoo). A diferencia de findTopProducts/findTopProductsByWeight, acá
-  // NO se separan los productos a granel: el ingreso ($) es comparable
-  // entre un producto por pieza y uno por peso, así que conviven en el
-  // mismo ranking de su categoría sin necesitar una unidad común.
+  // Top N productos dentro de cada categoría (product.category de Odoo),
+  // por ingresos ($, default) o por cantidad (`metric`, ver DTO). A
+  // diferencia de findTopProducts/findTopProductsByWeight, acá NO se
+  // separan los productos a granel del resto: por ingresos son
+  // comparables entre un producto por pieza y uno por peso, así que
+  // conviven en el mismo ranking de su categoría. Por cantidad cada
+  // producto lleva su propia unidad (`unit`: 'unidad' o 'kg' — ver
+  // CategoryProductDoc) en vez de forzar una conversión entre ambas.
   //
   // pos.order.line no trae la categoría del producto — solo product_id
   // (id, nombre) — así que hace falta un segundo viaje a product.product
@@ -275,29 +279,40 @@ export class SalesService {
       'findTopProductsByCategory',
     );
 
-    interface ProductRevenue {
+    interface ProductAgg {
       productId: number;
       productName: string;
       revenue: number;
+      pieceQty: number; // qty acumulada en líneas que NO son de peso
+      weightKg: number; // qty acumulada (convertida a Kg) en líneas de peso
     }
-    const revenueByProductId = new Map<number, ProductRevenue>();
+    const aggByProductId = new Map<number, ProductAgg>();
     for (const line of lines) {
       if (!line.product_id) continue;
       const [productId, productName] = line.product_id;
-      const existing = revenueByProductId.get(productId);
+      const factor = weightKgFactor(line.product_uom_id);
+      const existing = aggByProductId.get(productId);
       if (existing) {
         existing.revenue += line.price_subtotal_incl;
+        if (factor !== null) existing.weightKg += line.qty * factor;
+        else existing.pieceQty += line.qty;
       } else {
-        revenueByProductId.set(productId, { productId, productName, revenue: line.price_subtotal_incl });
+        aggByProductId.set(productId, {
+          productId,
+          productName,
+          revenue: line.price_subtotal_incl,
+          pieceQty: factor === null ? line.qty : 0,
+          weightKg: factor === null ? 0 : line.qty * factor,
+        });
       }
     }
-    if (revenueByProductId.size === 0) {
+    if (aggByProductId.size === 0) {
       return [];
     }
 
     const products = await this.fetchAllPages(
       (options) => this.odooService.findProducts(options),
-      [['id', 'in', [...revenueByProductId.keys()]]],
+      [['id', 'in', [...aggByProductId.keys()]]],
       'findTopProductsByCategory (productos)',
     );
     const categoryByProductId = new Map<number, RefDoc>();
@@ -312,10 +327,10 @@ export class SalesService {
       categoryId: number;
       categoryName: string;
       totalRevenue: number;
-      products: { productId: number; productName: string; revenue: number }[];
+      products: CategoryProductDoc[];
     }
     const byCategory = new Map<number, CategoryBucket>();
-    for (const product of revenueByProductId.values()) {
+    for (const product of aggByProductId.values()) {
       const category = categoryByProductId.get(product.productId) ?? UNCATEGORIZED_REF;
       const bucket = byCategory.get(category.id) ?? {
         categoryId: category.id,
@@ -324,22 +339,36 @@ export class SalesService {
         products: [],
       };
       bucket.totalRevenue += product.revenue;
+      // Un producto con alguna línea de peso prioriza Kg sobre piezas en
+      // vez de sumar 2 unidades incompatibles en un solo número — mismo
+      // criterio que findTopProductsByWeight (raro en la práctica: un
+      // producto se vende siempre en la misma UoM).
+      const isWeight = product.weightKg > 0;
       bucket.products.push({
         productId: product.productId,
         productName: product.productName,
         revenue: product.revenue,
+        quantity: isWeight ? product.weightKg : product.pieceQty,
+        unit: isWeight ? 'kg' : 'unidad',
       });
       byCategory.set(category.id, bucket);
     }
 
     const direction = query.order === 'asc' ? 1 : -1;
+    const metric = query.metric ?? 'revenue';
     return [...byCategory.values()]
-      .sort((a, b) => b.totalRevenue - a.totalRevenue) // categorías con más venta primero
+      // Categorías SIEMPRE ordenadas por ingresos, sin importar `metric`:
+      // sumar Kg de una categoría a granel con unidades de una por pieza
+      // no da un total que signifique algo — el ingreso sigue siendo la
+      // única unidad común para comparar categorías entre sí. `metric`
+      // solo cambia el orden y el valor mostrado de los PRODUCTOS dentro
+      // de cada categoría.
+      .sort((a, b) => b.totalRevenue - a.totalRevenue)
       .map((bucket) => ({
         categoryId: bucket.categoryId,
         categoryName: bucket.categoryName,
         products: bucket.products
-          .sort((a, b) => direction * (a.revenue - b.revenue))
+          .sort((a, b) => direction * (a[metric] - b[metric]))
           .slice(0, query.limit),
       }));
   }

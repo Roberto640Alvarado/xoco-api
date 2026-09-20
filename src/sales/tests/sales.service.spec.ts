@@ -313,6 +313,7 @@ describe('SalesService', () => {
         dateFrom: SEPT_7,
         limit: 10,
         order: 'desc',
+        metric: 'revenue',
       });
 
       // Bombones: 20 + 30 = 50 de venta total > Bebidas: 5 -> va primero.
@@ -320,11 +321,48 @@ describe('SalesService', () => {
 
       const bombones = categories.find((c) => c.categoryName === 'Bombones')!;
       expect(bombones.products.map((p) => p.productName)).toEqual(['Crocks Chocolate', 'Trufa Leche']);
-      expect(bombones.products[0]).toMatchObject({ productId: 12, revenue: 30 });
+      // Crocks: 500 g -> 0.5 Kg (unit propia, NO se mezcla con las 2 piezas de Trufa Leche).
+      expect(bombones.products[0]).toMatchObject({ productId: 12, revenue: 30, quantity: 0.5, unit: 'kg' });
+      expect(bombones.products[1]).toMatchObject({ productId: 10, revenue: 20, quantity: 2, unit: 'unidad' });
 
       const bebidas = categories.find((c) => c.categoryName === 'Bebidas')!;
-      expect(bebidas.products).toEqual([{ productId: 11, productName: 'Americano', revenue: 5 }]);
+      expect(bebidas.products).toEqual([
+        { productId: 11, productName: 'Americano', revenue: 5, quantity: 1, unit: 'unidad' },
+      ]);
     });
+
+    it('con metric="quantity" ordena los productos de cada categoría por cantidad en vez de ingresos, sin cambiar el orden de las categorías', async () => {
+      odoo = createOdooServiceMock({
+        orders: RAMBLAS_SEPT_7_ORDERS,
+        lines: [
+          lineOf(1, 33617, [10, 'Trufa Leche'], 2, 20),
+          lineOf(2, 33618, [11, 'Americano'], 1, 5),
+          lineOf(3, 33619, [12, 'Crocks Chocolate'], 500, 30, GRAMOS),
+        ],
+        products: [
+          productOf(10, [100, 'Bombones']),
+          productOf(11, [101, 'Bebidas']),
+          productOf(12, [100, 'Bombones']),
+        ],
+      });
+      const service = new SalesService(odoo.service);
+
+      const categories = await service.findTopProductsByCategory({
+        dateFrom: SEPT_7,
+        limit: 10,
+        order: 'desc',
+        metric: 'quantity',
+      });
+
+      // Mismo orden de categorías que por ingresos: Bombones (30+20=50) > Bebidas (5).
+      expect(categories.map((c) => c.categoryName)).toEqual(['Bombones', 'Bebidas']);
+
+      // Pero dentro de Bombones el orden se invierte: 2 (piezas de Trufa Leche)
+      // > 0.5 (Kg de Crocks), aunque Crocks tenga más ingresos.
+      const bombones = categories.find((c) => c.categoryName === 'Bombones')!;
+      expect(bombones.products.map((p) => p.productName)).toEqual(['Trufa Leche', 'Crocks Chocolate']);
+    });
+
 
     it('agrupa en "Sin categoría" los productos que no matchean contra product.product', async () => {
       odoo = createOdooServiceMock({
@@ -334,10 +372,14 @@ describe('SalesService', () => {
       });
       const service = new SalesService(odoo.service);
 
-      const categories = await service.findTopProductsByCategory({ dateFrom: SEPT_7, limit: 10, order: 'desc' });
+      const categories = await service.findTopProductsByCategory({ dateFrom: SEPT_7, limit: 10, order: 'desc', metric: 'revenue' });
 
       expect(categories).toEqual([
-        { categoryId: -1, categoryName: 'Sin categoría', products: [{ productId: 10, productName: 'Trufa Leche', revenue: 20 }] },
+        {
+          categoryId: -1,
+          categoryName: 'Sin categoría',
+          products: [{ productId: 10, productName: 'Trufa Leche', revenue: 20, quantity: 2, unit: 'unidad' }],
+        },
       ]);
     });
 
@@ -357,7 +399,7 @@ describe('SalesService', () => {
       });
       const service = new SalesService(odoo.service);
 
-      const [bebidas] = await service.findTopProductsByCategory({ dateFrom: SEPT_7, limit: 2, order: 'desc' });
+      const [bebidas] = await service.findTopProductsByCategory({ dateFrom: SEPT_7, limit: 2, order: 'desc', metric: 'revenue' });
 
       expect(bebidas.products.map((p) => p.productName)).toEqual(['Trufa Leche', 'Americano']);
     });
