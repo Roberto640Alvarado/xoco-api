@@ -23,7 +23,7 @@ export class InventoryController {
   @ApiOperation({
     summary: 'Catálogo completo de Odoo cruzado con el inventario ya capturado para una tienda.',
     description:
-      'Trae TODO product.product activo de Odoo (solo lectura) y lo cruza con lo guardado en nuestra base para esta tienda. quantity=null significa que ese producto todavía no se ha contado.',
+      'Trae TODO product.product activo de Odoo (solo lectura) y lo cruza con lo guardado en nuestra base para esta tienda. quantity=null significa que ese producto todavía no se ha contado. odooQuantity trae la existencia de Odoo (stock.quant) de la bodega de esta tienda, solo como referencia — null si no hay bodega mapeada o Odoo no reporta nada para ese producto ahí.',
   })
   findItemsForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number) {
     return this.inventoryService.findItemsForStore(posConfigId);

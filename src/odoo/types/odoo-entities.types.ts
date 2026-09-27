@@ -175,3 +175,26 @@ export interface OdooPosPaymentGroup {
   payment_method_id?: OdooMany2One;
   amount?: number;
 }
+
+// stock.warehouse — solo se pide para resolver, a partir del
+// warehouse_id de un pos.config, la ubicación raíz de existencias de esa
+// bodega (lot_stock_id), y así poder filtrar stock.quant por bodega (ver
+// InventoryService — Inventario usa esto como referencia de existencia
+// de Odoo, no como fuente de verdad).
+export interface OdooWarehouse {
+  id: number;
+  name: string;
+  code: string;
+  lot_stock_id: OdooMany2One;
+}
+
+// stock.quant — una fila por (producto, ubicación). `quantity` es la
+// existencia física en esa ubicación (on hand); no se pide
+// `reserved_quantity` porque Inventario solo usa esto como referencia de
+// punto de partida, no para reservas/disponibilidad exacta.
+export interface OdooStockQuant {
+  id: number;
+  product_id: OdooMany2One;
+  location_id: OdooMany2One;
+  quantity: number;
+}

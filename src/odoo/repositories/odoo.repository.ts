@@ -19,6 +19,8 @@ import {
   OdooPosSession,
   OdooProduct,
   OdooProductCategory,
+  OdooStockQuant,
+  OdooWarehouse,
 } from '../types/odoo-entities.types.js';
 
 // Error propio, para que OdooService lo traduzca a una excepción de Nest
@@ -130,6 +132,42 @@ export class OdooRepository {
       args,
       {
         fields: ['id', 'name', 'complete_name', 'parent_id', 'create_date', 'write_date'],
+        limit: 100,
+        ...kwargs,
+      },
+    );
+  }
+
+  // Solo se pide lot_stock_id: la ubicación "Stock" raíz de esa bodega,
+  // para filtrar stock.quant por bodega vía location_id child_of (ver
+  // InventoryService).
+  findWarehouses(credentials: OdooCredentials, options?: OdooSearchReadOptions) {
+    const { args, kwargs } = this.toSearchReadArgs(options);
+    return this.executeKw<OdooWarehouse[]>(
+      credentials,
+      'stock.warehouse',
+      'search_read',
+      args,
+      {
+        fields: ['id', 'name', 'code', 'lot_stock_id'],
+        limit: 100,
+        ...kwargs,
+      },
+    );
+  }
+
+  // Existencia física (on hand) por producto+ubicación — Inventario lo usa
+  // como referencia/punto de partida al capturar el inventario inicial de
+  // una tienda, nunca como fuente de verdad (ver plan-history).
+  findStockQuants(credentials: OdooCredentials, options?: OdooSearchReadOptions) {
+    const { args, kwargs } = this.toSearchReadArgs(options);
+    return this.executeKw<OdooStockQuant[]>(
+      credentials,
+      'stock.quant',
+      'search_read',
+      args,
+      {
+        fields: ['id', 'product_id', 'location_id', 'quantity'],
         limit: 100,
         ...kwargs,
       },

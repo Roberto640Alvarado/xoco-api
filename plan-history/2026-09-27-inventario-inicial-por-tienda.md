@@ -35,3 +35,24 @@ Decisiones confirmadas por el usuario:
 - Mermas, regalías, envíos planta→tienda, recepción y Kardex quedan para tramos futuros — este tramo solo cubre "inventario inicial capturado y visible por tienda".
 - Correr `node prisma/backfill-role-module-access.mjs` una vez desplegado el cambio, para sembrar `dashboard.inventario` en `role_module_access`.
 - `npm run lint` (oxlint) y `npm test` (vitest) no se pudieron correr en esta sesión — mismo problema de binarios nativos (Linux ARM vs macOS ARM en `node_modules`) ya documentado en sesiones anteriores. `npx tsc --noEmit` sí corrió limpio (solo un error preexistente y no relacionado en `test/app.e2e-spec.ts`, tipos de `supertest`).
+
+
+## Ajuste same-day: existencia de Odoo como referencia (odooQuantity)
+
+El usuario probó la vista y esperaba ver una cantidad ya traída de Odoo, no un campo vacío. Se verificó con AskUserQuestion: quiere que la cantidad se precargue con la existencia que Odoo ya tenga, como punto de partida, y Finanzas solo la ajuste — no reemplaza la captura manual (que sigue siendo la fuente de verdad de este tramo), es una referencia adicional.
+
+Cambios:
+- **`src/odoo/types/odoo-entities.types.ts`**: nuevos tipos `OdooWarehouse` (`lot_stock_id`) y `OdooStockQuant` (`product_id`, `location_id`, `quantity`).
+- **`src/odoo/repositories/odoo.repository.ts`** / **`src/odoo/services/odoo.service.ts`**: nuevos métodos `findWarehouses` (`stock.warehouse`) y `findStockQuants` (`stock.quant`).
+- **`src/inventory/services/inventory.service.ts`**: `findItemsForStore` ahora también resuelve, para el `pos.config` de la tienda, su `warehouse_id` → `stock.warehouse.lot_stock_id` (ubicación raíz "Stock" de esa bodega) → suma de `stock.quant.quantity` de todas las ubicaciones bajo esa bodega (`location_id child_of lot_stock_id`, paginado). Ese total se expone como `odooQuantity` por producto — `null` si el pos.config no tiene bodega asignada, o si Odoo no reporta nada ahí para ese producto.
+- **`src/inventory/doc/inventory.doc.ts`**: `InventoryItemDoc` gana el campo `odooQuantity: number | null`.
+
+## Razones del cambio
+
+- `product.qty_available` (ya se pedía en `findProducts`) es una existencia GLOBAL de la empresa, no por tienda/bodega — usarla como sugerencia por tienda mostraría el mismo número en las 4 tiendas, lo cual sería peor que un campo vacío (parecería que cada tienda tiene el total de todas). Por eso se optó por `stock.quant` filtrado por bodega en vez de simplemente exponer `qty_available`.
+- Se filtra con `location_id child_of <lot_stock_id>` (en vez de depender de un eventual campo `warehouse_id` en `stock.quant`, que no está garantizado en todas las versiones/configuraciones de Odoo) porque `child_of` sobre la ubicación raíz de la bodega es la forma estándar y más robusta de Odoo para "todo lo que hay bajo esta bodega", incluyendo sub-ubicaciones.
+- **IMPORTANTE — no verificado contra el Odoo real del negocio**: esta sesión no tiene salida de red hacia `xocolatisimo.odoo.com` (mismo bloqueo ya documentado para GitHub/npm), así que esta lógica se construyó sobre el comportamiento ESTÁNDAR de Odoo (stock.warehouse/stock.quant), no contra datos reales confirmados. Falta probarlo en vivo: si algún pos.config no tiene `warehouse_id`, o la bodega no tiene `lot_stock_id`, o hay más de una bodega por tienda, `odooQuantity` simplemente sale `null` (fallback seguro, no rompe la captura manual) — pero conviene revisar con datos reales que los números que trae tengan sentido antes de confiar en ellos como referencia.
+
+## Resultado final
+
+`npx tsc --noEmit`: solo el error preexistente y no relacionado de `test/app.e2e-spec.ts` (tipos de `supertest`). `npm run lint`/`npm test` siguen sin poder correr en esta sesión (mismo problema de binarios nativos ya documentado).
