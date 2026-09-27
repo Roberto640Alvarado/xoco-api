@@ -531,7 +531,7 @@ function lineOf(
 }
 
 // Producto a granel: en Odoo su UoM es "g" — 500 en `qty` son 500 GRAMOS,
-// no 500 piezas (ver src/sales/utils/product-uom.util.ts).
+// no 500 piezas (ver src/common/utils/product-uom.util.ts).
 const GRAMOS: [number, string] = [5, 'g'];
 const KILOGRAMOS: [number, string] = [6, 'kg'];
 

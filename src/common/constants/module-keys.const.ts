@@ -29,6 +29,7 @@ export const MODULE_KEYS = [
   'dashboard.productos',
   'dashboard.categorias',
   'dashboard.cierre-mes',
+  'dashboard.inventario',
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -63,4 +64,7 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   'dashboard.productos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.categorias': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.cierre-mes': [Role.SUPER_ADMIN, Role.FINANZAS],
+  // Inventario: Vendedor NO entra en este primer tramo (captura
+  // centralizada por Finanzas — ver plan-history de Inventario).
+  'dashboard.inventario': [Role.SUPER_ADMIN, Role.FINANZAS],
 };

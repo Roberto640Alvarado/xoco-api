@@ -160,3 +160,27 @@ model RoleModuleAccess {
   @@unique([role, moduleKey])
   @@map("role_module_access")
 }
+
+// Inventario por tienda — captura del conteo físico de cada producto,
+// hecha por Finanzas de forma centralizada (ver plan-history de
+// Inventario). Vive en NUESTRA base, no en Odoo: el API key de Odoo es
+// de SOLO LECTURA, así que "cargar en Odoo como inventario inicial" (el
+// paso del diagrama que dio el negocio) no se puede hacer desde esta app.
+// Esta colección es entonces la fuente de verdad del inventario por
+// tienda — no un espejo de Odoo — y por ahora solo guarda el valor
+// ACTUAL (sin historial de versiones; ver InventoryRepository.upsert).
+// `productId` es el id de product.product en Odoo: no hay FK real (Mongo
+// + catálogo externo), se resuelve contra Odoo al leer (InventoryService
+// cruza esta colección con GET product.product para traer nombre/unidad
+// y mostrar en 0 los productos que aún no se han contado).
+model StoreInventoryItem {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  posConfigId    Int
+  productId      Int
+  quantity       Float
+  updatedAt      DateTime @updatedAt
+  updatedByEmail String?
+
+  @@unique([posConfigId, productId])
+  @@map("store_inventory_items")
+}

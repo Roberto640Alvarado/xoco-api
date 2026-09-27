@@ -1,5 +1,10 @@
 import { OdooMany2One } from '../../odoo/types/odoo-common.types.js';
 
+// Movido de sales/utils a common/utils: antes solo lo usaba SalesService,
+// ahora también InventoryService (unidad "u"/"kg" a mostrar por producto
+// en el inventario por tienda) — mismo criterio ya usado en el proyecto
+// para fetchAllOdooPages (ver odoo-pagination.util.ts).
+
 // Kilogramos que equivale UNA unidad de cada UoM de peso que puede traer
 // Odoo en `product_uom_id`. "Crocks" y otros productos a granel se venden
 // por peso: su `qty` en pos.order.line viene en esa unidad (típicamente

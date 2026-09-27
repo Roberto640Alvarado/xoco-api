@@ -15,7 +15,7 @@ import {
 } from '../../common/utils/store-date.util.js';
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { roundMoney } from '../../common/utils/money.util.js';
-import { isWeightUom, weightKgFactor } from '../utils/product-uom.util.js';
+import { isWeightUom, weightKgFactor } from '../../common/utils/product-uom.util.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
 import { FindProductMonthlyComparisonQueryDto } from '../dto/find-product-monthly-comparison-query.dto.js';

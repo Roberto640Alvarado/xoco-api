@@ -100,7 +100,7 @@ export interface OdooPosOrderLine {
   // UoM de la línea — es lo único que dice si el producto se vende por
   // pieza o por peso (ej. "g"/"kg") sin una llamada extra a Odoo. `qty` de
   // un producto a granel viene en esta unidad, no en piezas (ver
-  // sales/utils/product-uom.util.ts).
+  // common/utils/product-uom.util.ts).
   product_uom_id: OdooMany2One;
   qty: number;
   price_unit: number;

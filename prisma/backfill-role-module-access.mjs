@@ -53,6 +53,9 @@ const MODULE_ROLE_CEILING = [
   // se siembra igual para que el panel Permisos y /auth/me lo incluyan;
   // su enforcement es solo de frontend (ver plan de Fase 3).
   { moduleKey: 'dashboard.cierre-mes', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
+  // Inventario: Vendedor NO entra en este primer tramo (captura
+  // centralizada por Finanzas — ver plan-history de Inventario).
+  { moduleKey: 'dashboard.inventario', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
 ];
 
 async function main() {
