@@ -33,7 +33,14 @@ export interface OdooProductCategory {
 export interface OdooPosConfig {
   id: number;
   name: string;
+  // OJO: `warehouse_id` de un pos.config puede estar mal configurado en
+  // Odoo (visto en producción: 3 de 4 tiendas apuntaban todas a la misma
+  // bodega "Plaza Centrika" en vez de la suya propia) — para saber la
+  // ubicación de existencias REAL de una tienda hay que ir por
+  // `picking_type_id` (ver InventoryService.findStockLocationId), que sí
+  // reflejaba correctamente cada tienda al verificarlo en vivo.
   warehouse_id: OdooMany2One;
+  picking_type_id: OdooMany2One;
   company_id: OdooMany2One;
   active: boolean;
   // Diarios contables en los que caen las facturas de esta tienda. El
@@ -176,16 +183,19 @@ export interface OdooPosPaymentGroup {
   amount?: number;
 }
 
-// stock.warehouse — solo se pide para resolver, a partir del
-// warehouse_id de un pos.config, la ubicación raíz de existencias de esa
-// bodega (lot_stock_id), y así poder filtrar stock.quant por bodega (ver
-// InventoryService — Inventario usa esto como referencia de existencia
-// de Odoo, no como fuente de verdad).
-export interface OdooWarehouse {
+// stock.picking.type — se pide para resolver, a partir del
+// picking_type_id de un pos.config, la ubicación de existencias REAL de
+// esa tienda (default_location_src_id: de dónde sale el stock cuando se
+// vende ahí), y así poder filtrar stock.quant (ver InventoryService —
+// Inventario usa esto como referencia de existencia de Odoo, no como
+// fuente de verdad). Se usa esto y no `pos.config.warehouse_id` porque
+// ese campo puede estar mal configurado en Odoo sin que el punto de
+// venta deje de vender correctamente contra su propia ubicación.
+export interface OdooPickingType {
   id: number;
   name: string;
-  code: string;
-  lot_stock_id: OdooMany2One;
+  warehouse_id: OdooMany2One;
+  default_location_src_id: OdooMany2One;
 }
 
 // stock.quant — una fila por (producto, ubicación). `quantity` es la

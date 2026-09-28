@@ -20,6 +20,7 @@ export function posConfig(data: PosConfigMockData): OdooPosConfig {
     id: data.id,
     name: data.name,
     warehouse_id: false,
+    picking_type_id: false,
     company_id: [1, 'CACAO, S.A DE C.V'],
     active: true,
     invoice_journal_id: data.invoiceJournal,

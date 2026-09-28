@@ -23,26 +23,32 @@ export class InventoryService {
     private readonly odooService: OdooService,
   ) {}
 
-  // Bodega (stock.warehouse) asociada al pos.config de esta tienda, o
-  // null si no tiene una asignada — un pos.config sin warehouse_id, o sin
-  // registro de stock.warehouse encontrado, simplemente no tiene
-  // existencia de Odoo que sugerir (no es un error).
+  // Ubicación de existencias REAL de la tienda, o null si no se pudo
+  // resolver (no es un error: simplemente no hay existencia de Odoo que
+  // sugerir). Se va por `picking_type_id` del pos.config en vez de
+  // `warehouse_id` — se verificó en vivo contra el Odoo del negocio
+  // (2026-09-28) que `warehouse_id` puede estar mal configurado (3 de 4
+  // tiendas apuntaban todas a la bodega "Plaza Centrika") mientras que el
+  // `picking_type_id` de cada una sí reflejaba correctamente su propia
+  // tienda, con `default_location_src_id` apuntando a su ubicación real
+  // de existencias (ej. "SB/Existencias" para San Benito) — es de ahí de
+  // donde Odoo realmente descuenta cuando se vende en esa tienda.
   private async findStockLocationId(posConfigId: number): Promise<number | null> {
     const posConfigs = await this.odooService.findPosConfigs({
       domain: [['id', '=', posConfigId]],
       limit: 1,
     });
     const posConfig = posConfigs[0];
-    if (!posConfig?.warehouse_id) return null;
+    if (!posConfig?.picking_type_id) return null;
 
-    const warehouses = await this.odooService.findWarehouses({
-      domain: [['id', '=', posConfig.warehouse_id[0]]],
+    const pickingTypes = await this.odooService.findPickingTypes({
+      domain: [['id', '=', posConfig.picking_type_id[0]]],
       limit: 1,
     });
-    const warehouse = warehouses[0];
-    if (!warehouse?.lot_stock_id) return null;
+    const pickingType = pickingTypes[0];
+    if (!pickingType?.default_location_src_id) return null;
 
-    return warehouse.lot_stock_id[0];
+    return pickingType.default_location_src_id[0];
   }
 
   // Suma de existencia (on hand) por producto, para TODAS las

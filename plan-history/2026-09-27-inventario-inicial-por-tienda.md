@@ -56,3 +56,30 @@ Cambios:
 ## Resultado final
 
 `npx tsc --noEmit`: solo el error preexistente y no relacionado de `test/app.e2e-spec.ts` (tipos de `supertest`). `npm run lint`/`npm test` siguen sin poder correr en esta sesión (mismo problema de binarios nativos ya documentado).
+
+
+## Ajuste 2026-09-28: `odooQuantity` salía igual en varias tiendas — verificado en vivo y corregido
+
+El usuario reportó que "Índice inicial (Odoo)" mostraba la misma cantidad para un mismo producto en varias tiendas. Como esta sesión no tiene salida de red directa hacia Odoo (bloqueo de red ya documentado), se verificó en vivo usando el navegador integrado de Claude Desktop, ya autenticado con la sesión real de Odoo del usuario (solo lectura vía `fetch` a `/web/dataset/call_kw` desde la propia página — nada se configuró ni se modificó en Odoo, solo `search_read`).
+
+Se confirmó la causa: **`pos.config.warehouse_id` está mal configurado en Odoo** — San Benito, Tienda Ramblas y Sucursal Escalon (pos.config ids 2, 3, 4) tienen ese campo apuntando los tres a la bodega "Plaza Centrika" (id 1), en vez de a su propia bodega (que sí existe como registro `stock.warehouse` separado — ids 9, 10, 11). Solo CENTRIKA (id 1) está bien.
+
+Pero se encontró que **`pos.config.picking_type_id` SÍ está bien configurado** para las 4 tiendas — apunta al tipo de operación correcto de cada una (ej. "San Benito: Órdenes de PdV"), y ese `stock.picking.type.default_location_src_id` sí apunta a la ubicación real de existencias de cada tienda (ej. "SB/Existencias" para San Benito, "SRam/Existencias" para Ramblas, "es/Stock" para Escalon) — es justo de ahí de donde Odoo descuenta cuando se vende en el POS de esa tienda (confirmado también con `stock.move.line` en la ronda anterior).
+
+Cambios:
+- **`src/odoo/types/odoo-entities.types.ts`**: `OdooPosConfig` gana `picking_type_id`. Se reemplaza `OdooWarehouse` (ya no se usa) por `OdooPickingType` (`id`, `name`, `warehouse_id`, `default_location_src_id`).
+- **`src/odoo/repositories/odoo.repository.ts`**: `findPosConfigs` ahora también pide `picking_type_id`. Se reemplaza `findWarehouses` (`stock.warehouse`) por `findPickingTypes` (`stock.picking.type`, fields `id/name/warehouse_id/default_location_src_id`).
+- **`src/odoo/services/odoo.service.ts`**: se reemplaza el wrapper `findWarehouses` por `findPickingTypes`.
+- **`src/inventory/services/inventory.service.ts`**: `findStockLocationId` ya NO usa `warehouse_id` → `stock.warehouse.lot_stock_id`. Ahora usa `picking_type_id` → `stock.picking.type.default_location_src_id` directamente — un paso menos, y no depende del campo que está mal configurado.
+- **`src/sales/tests/mocks/pos-configs.mock.ts`**: se agregó `picking_type_id: false` al mock (nuevo campo requerido del tipo `OdooPosConfig`).
+
+Sin cambios en el modelo de Mongo ni en los endpoints — mismo contrato, solo cambia de dónde saca `odooQuantity` la referencia por tienda.
+
+## Razones del cambio
+
+- No se le pidió al negocio corregir `warehouse_id` en Odoo (aunque sigue siendo lo correcto a mediano plazo, para que el dato quede consistente en el propio Odoo) porque `picking_type_id` ya resuelve el problema sin depender de que alguien entre a Odoo a arreglar la configuración — y porque `picking_type_id` es, en la práctica, el campo que de verdad rige de dónde sale el stock cuando se vende, más confiable que `warehouse_id` como fuente de la ubicación real.
+- La verificación se hizo por el navegador integrado (sesión ya autenticada del usuario) en vez de con `scripts/inspect-odoo-stock.mjs` porque esta sesión sigue sin salida de red hacia Odoo ni Mongo desde `device_bash`/el contenedor — el navegador fue la única vía disponible para consultar datos reales sin pedirle al usuario que corriera algo en su propia terminal.
+
+## Resultado final
+
+`npx tsc --noEmit -p tsconfig.json`: sin errores nuevos (solo el mismo error preexistente y no relacionado de `test/app.e2e-spec.ts`, tipos de `supertest`). `npm run lint` (oxlint) sigue sin poder correr en esta sesión — mismo problema de binarios nativos ya documentado; no afecta a este cambio. **Esta vez sí verificado contra datos reales de Odoo** — pendiente que el usuario confirme en la app que "Índice inicial" ya muestra números distintos y correctos por tienda.

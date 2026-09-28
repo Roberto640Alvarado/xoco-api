@@ -70,8 +70,8 @@ export class OdooService {
     return this.run((credentials) => this.odooRepository.findCategories(credentials, options));
   }
 
-  findWarehouses(options?: OdooSearchReadOptions) {
-    return this.run((credentials) => this.odooRepository.findWarehouses(credentials, options));
+  findPickingTypes(options?: OdooSearchReadOptions) {
+    return this.run((credentials) => this.odooRepository.findPickingTypes(credentials, options));
   }
 
   findStockQuants(options?: OdooSearchReadOptions) {

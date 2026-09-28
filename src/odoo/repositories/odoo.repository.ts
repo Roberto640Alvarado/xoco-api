@@ -19,8 +19,8 @@ import {
   OdooPosSession,
   OdooProduct,
   OdooProductCategory,
+  OdooPickingType,
   OdooStockQuant,
-  OdooWarehouse,
 } from '../types/odoo-entities.types.js';
 
 // Error propio, para que OdooService lo traduzca a una excepción de Nest
@@ -138,18 +138,19 @@ export class OdooRepository {
     );
   }
 
-  // Solo se pide lot_stock_id: la ubicación "Stock" raíz de esa bodega,
-  // para filtrar stock.quant por bodega vía location_id child_of (ver
-  // InventoryService).
-  findWarehouses(credentials: OdooCredentials, options?: OdooSearchReadOptions) {
+  // Se pide default_location_src_id: de dónde sale el stock cuando se
+  // vende con este tipo de operación — es la ubicación REAL de
+  // existencias de una tienda (ver InventoryService, y el comentario en
+  // OdooPickingType sobre por qué esto y no pos.config.warehouse_id).
+  findPickingTypes(credentials: OdooCredentials, options?: OdooSearchReadOptions) {
     const { args, kwargs } = this.toSearchReadArgs(options);
-    return this.executeKw<OdooWarehouse[]>(
+    return this.executeKw<OdooPickingType[]>(
       credentials,
-      'stock.warehouse',
+      'stock.picking.type',
       'search_read',
       args,
       {
-        fields: ['id', 'name', 'code', 'lot_stock_id'],
+        fields: ['id', 'name', 'warehouse_id', 'default_location_src_id'],
         limit: 100,
         ...kwargs,
       },
@@ -186,6 +187,7 @@ export class OdooRepository {
           'id',
           'name',
           'warehouse_id',
+          'picking_type_id',
           'company_id',
           'active',
           'invoice_journal_id',
