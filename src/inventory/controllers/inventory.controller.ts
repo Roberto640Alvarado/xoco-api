@@ -4,18 +4,20 @@ import { Role } from '../../generated/prisma/index.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { User } from '../../common/decorators/user.decorator.js';
 import { RequiresModule } from '../../common/decorators/requires-module.decorator.js';
+import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.js';
+import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { InventoryLedgerService } from '../services/inventory-ledger.service.js';
 import { FindInventoryLedgerQueryDto } from '../dto/find-inventory-ledger-query.dto.js';
 import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 
-// Inventario por tienda — a diferencia de Goals/Sales, Vendedor NO tiene
-// acceso en este primer tramo: la captura del inventario inicial es
-// centralizada por Finanzas (ver plan-history). Vendedor podrá entrar en
-// un tramo futuro (recepción/confirmación de envíos).
+// Inventario por tienda. La captura del conteo físico (PUT) es
+// centralizada: solo Admin/Finanzas. El Vendedor puede LEER el stock y el
+// Registro de SU tienda (assertOwnStoreOrThrow -> 403 si pide otra), nunca
+// escribir.
 @ApiTags('inventory')
 @ApiBearerAuth()
-@Roles(Role.SUPER_ADMIN, Role.FINANZAS)
+@Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
 @RequiresModule('dashboard.inventario')
 @Controller('inventory')
 export class InventoryController {
@@ -30,11 +32,13 @@ export class InventoryController {
     description:
       'Trae TODO product.product activo de Odoo (solo lectura) y lo cruza con lo guardado en nuestra base para esta tienda. quantity=null significa que ese producto todavía no se ha contado. estimatedQuantity es el conteo físico menos ventas y mermas/regalías/degustaciones, más entradas confirmadas desde ese conteo.',
   })
-  findItemsForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number) {
+  findItemsForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number, @User() user: AuthenticatedUser) {
+    assertOwnStoreOrThrow(user, posConfigId);
     return this.inventoryService.findItemsForStore(posConfigId);
   }
 
   @Put('stores/:posConfigId/items')
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS)
   @ApiOperation({
     summary: 'Guarda (crea o actualiza) la cantidad física de uno o varios productos para una tienda.',
   })
@@ -52,7 +56,12 @@ export class InventoryController {
     description:
       'Une ventas de Odoo (una línea por producto vendido), merma/regalía/degustación/entrada y conteos físicos. Filtra por rango de días (hora local de la tienda), producto y tipo.',
   })
-  findLedger(@Param('posConfigId', ParseIntPipe) posConfigId: number, @Query() query: FindInventoryLedgerQueryDto) {
+  findLedger(
+    @Param('posConfigId', ParseIntPipe) posConfigId: number,
+    @Query() query: FindInventoryLedgerQueryDto,
+    @User() user: AuthenticatedUser,
+  ) {
+    assertOwnStoreOrThrow(user, posConfigId);
     return this.ledgerService.findLedger(posConfigId, query);
   }
 }

@@ -21,4 +21,9 @@ export interface InventoryMovementDoc {
   registeredByRole: Role;
   resolvedByEmail: string | null;
   resolvedAt: Date | null;
+  // Solo ENTRADA: quién/cuándo aceptó la solicitud (pasó a EN_CAMINO).
+  acceptedByEmail: string | null;
+  acceptedAt: Date | null;
+  // Motivo con el que Admin/Finanzas rechazó — null si no está rechazado.
+  rejectionReason: string | null;
 }

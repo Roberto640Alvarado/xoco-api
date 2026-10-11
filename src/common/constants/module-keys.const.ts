@@ -65,9 +65,10 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   'dashboard.productos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.categorias': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.cierre-mes': [Role.SUPER_ADMIN, Role.FINANZAS],
-  // Inventario: Vendedor NO entra en este primer tramo (captura
-  // centralizada por Finanzas — ver plan-history de Inventario).
-  'dashboard.inventario': [Role.SUPER_ADMIN, Role.FINANZAS],
+  // Inventario (Conteo y Registro): Vendedor SOLO LEE el de su propia
+  // tienda (assertOwnStoreOrThrow); la captura del conteo (PUT) sigue
+  // siendo exclusiva de Admin/Finanzas vía @Roles en el método.
+  'dashboard.inventario': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   // Segundo tramo: merma/regalías/degustaciones — Vendedor SÍ entra acá
   // (reporta las de su propia tienda), a diferencia de
   // 'dashboard.inventario' (el conteo físico completo, que sigue siendo

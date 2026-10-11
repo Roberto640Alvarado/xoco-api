@@ -62,33 +62,49 @@ export class InventoryMovementsRepository {
     });
   }
 
-  // Cuántos movimientos hay en alguno de estos estados — de una tienda, o de
-  // todas si no se pasa `posConfigId` (aviso de pendientes de Admin/Finanzas).
-  countByStatuses(statuses: InventoryMovementStatus[], posConfigId?: number): Promise<number> {
-    return this.prisma.storeInventoryMovement.count({
-      where: { status: { in: statuses }, ...(posConfigId === undefined ? {} : { posConfigId }) },
+  // Movimientos abiertos de TODAS las tiendas, más recientes primero — la
+  // bandeja de Admin/Finanzas. `entrada` separa las solicitudes de stock
+  // (ENTRADA) de merma/regalía/degustación.
+  findOpen(entrada: boolean, statuses: InventoryMovementStatus[]): Promise<StoreInventoryMovement[]> {
+    return this.prisma.storeInventoryMovement.findMany({
+      where: { status: { in: statuses }, type: this.entradaFilter(entrada) },
+      orderBy: { occurredAt: 'desc' },
     });
   }
 
-  // Entradas (envíos planta→tienda) de la tienda que siguen esperando que el
-  // Vendedor las marque como recibidas.
-  countPendingEntradas(posConfigId: number): Promise<number> {
+  // Cuántos movimientos (ENTRADA o no) hay en alguno de estos estados — de
+  // una tienda, o de todas si no se pasa `posConfigId`.
+  countByStatuses(entrada: boolean, statuses: InventoryMovementStatus[], posConfigId?: number): Promise<number> {
     return this.prisma.storeInventoryMovement.count({
-      where: { posConfigId, type: InventoryMovementType.ENTRADA, status: InventoryMovementStatus.PENDIENTE },
+      where: {
+        status: { in: statuses },
+        type: this.entradaFilter(entrada),
+        ...(posConfigId === undefined ? {} : { posConfigId }),
+      },
     });
   }
 
   // Lo que `registeredByEmail` reportó y Admin/Finanzas ya confirmó o
-  // rechazó después de `since` — el aviso de "resuelto" del Vendedor.
-  countResolvedSince(posConfigId: number, registeredByEmail: string, since: Date): Promise<number> {
+  // rechazó después de `since` — la novedad "resuelto" del Vendedor.
+  countResolvedSince(
+    entrada: boolean,
+    posConfigId: number,
+    registeredByEmail: string,
+    since: Date,
+  ): Promise<number> {
     return this.prisma.storeInventoryMovement.count({
       where: {
         posConfigId,
         registeredByEmail,
+        type: this.entradaFilter(entrada),
         status: { in: [InventoryMovementStatus.CONFIRMADO, InventoryMovementStatus.RECHAZADO] },
         resolvedAt: { gt: since },
       },
     });
+  }
+
+  private entradaFilter(entrada: boolean) {
+    return entrada ? InventoryMovementType.ENTRADA : { not: InventoryMovementType.ENTRADA };
   }
 
   async findByIdOrThrow(id: string): Promise<StoreInventoryMovement> {
@@ -101,10 +117,19 @@ export class InventoryMovementsRepository {
     id: string,
     status: InventoryMovementStatus,
     resolvedByEmail: string,
+    rejectionReason?: string,
   ): Promise<StoreInventoryMovement> {
     return this.prisma.storeInventoryMovement.update({
       where: { id },
-      data: { status, resolvedByEmail, resolvedAt: new Date() },
+      data: { status, resolvedByEmail, resolvedAt: new Date(), ...(rejectionReason ? { rejectionReason } : {}) },
+    });
+  }
+
+  // Admin/Finanzas aceptó la solicitud de stock: el envío va en camino.
+  markAccepted(id: string, acceptedByEmail: string): Promise<StoreInventoryMovement> {
+    return this.prisma.storeInventoryMovement.update({
+      where: { id },
+      data: { status: InventoryMovementStatus.EN_CAMINO, acceptedByEmail, acceptedAt: new Date() },
     });
   }
 

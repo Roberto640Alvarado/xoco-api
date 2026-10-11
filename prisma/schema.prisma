@@ -208,14 +208,19 @@ enum InventoryMovementType {
 // FINANZAS queda CONFIRMADO de una vez — es la misma persona que hoy
 // hace el conteo físico, no tiene sentido pedirle que se autoconfirme.
 //
-// RECIBIDO es exclusivo del flujo de ENTRADA solicitada por un Vendedor:
-// PENDIENTE (el Vendedor pidió el envío) -> RECIBIDO (el Vendedor marcó
-// que ya llegó e ingresó la cantidad real, ver
-// InventoryMovementsService.receive) -> CONFIRMADO/RECHAZADO (Admin o
-// Finanzas revisa y cierra el ciclo). Los demás tipos nunca pasan por
-// RECIBIDO — van directo de PENDIENTE a CONFIRMADO/RECHAZADO.
+// Flujo de ENTRADA (solicitud de stock de un Vendedor):
+// PENDIENTE (el Vendedor pidió más stock) -> EN_CAMINO (Admin/Finanzas
+// aceptó la solicitud y el envío va en camino, ver
+// InventoryMovementsService.accept) -> RECIBIDO (el Vendedor marcó que ya
+// llegó e ingresó la cantidad real, ver InventoryMovementsService.receive)
+// -> CONFIRMADO (Admin/Finanzas lo da por bueno y recién ahí se suma al
+// stock). En cualquier paso antes de CONFIRMADO, Admin/Finanzas puede
+// pasarlo a RECHAZADO con un motivo (`rejectionReason`) que el Vendedor ve.
+// Los demás tipos nunca pasan por EN_CAMINO/RECIBIDO — van directo de
+// PENDIENTE a CONFIRMADO/RECHAZADO.
 enum InventoryMovementStatus {
   PENDIENTE
+  EN_CAMINO
   RECIBIDO
   CONFIRMADO
   RECHAZADO
@@ -252,6 +257,13 @@ model StoreInventoryMovement {
   // directamente Admin/Finanzas (ya nace CONFIRMADO).
   resolvedByEmail String?
   resolvedAt      DateTime?
+
+  // Solo ENTRADA: cuándo y quién aceptó la solicitud (PENDIENTE ->
+  // EN_CAMINO). Motivo obligatorio cuando algo pasa a RECHAZADO — lo ve
+  // el Vendedor en su seguimiento.
+  acceptedByEmail String?
+  acceptedAt      DateTime?
+  rejectionReason String?
 
   @@map("store_inventory_movements")
 }

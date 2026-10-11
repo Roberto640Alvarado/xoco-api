@@ -24,7 +24,7 @@ export interface InventoryLedgerEntryDoc {
   // Magnitud sin signo: unidades vendidas/movidas (en ENTRADA, la
   // recibida cuando existe) o, en CONTEO, la cantidad contada.
   quantity: number;
-  // Solo movimientos manuales: PENDIENTE | RECIBIDO | CONFIRMADO | RECHAZADO.
+  // Solo movimientos manuales: PENDIENTE | EN_CAMINO | RECIBIDO | CONFIRMADO | RECHAZADO.
   status: string | null;
   // Nota del movimiento, número de orden del POS o "antes: X" en un conteo.
   detail: string | null;

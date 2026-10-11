@@ -5,9 +5,17 @@ export class FindMovementNotificationsQueryDto {
   @ApiPropertyOptional({
     example: '2026-10-11T15:00:00.000Z',
     description:
-      'Solo VENDEDOR: cuenta como "resuelto sin ver" lo que Admin/Finanzas confirmó o rechazó después de esta fecha (última vez que el Vendedor abrió Movimientos). Por defecto, los últimos 7 días.',
+      'Solo VENDEDOR: última vez que abrió Movimientos — cuenta como novedad lo que Admin/Finanzas confirmó o rechazó después. Por defecto, los últimos 7 días.',
   })
   @IsOptional()
   @IsDateString()
-  since?: string;
+  sinceMovements?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-10-11T15:00:00.000Z',
+    description: 'Solo VENDEDOR: lo mismo que sinceMovements, pero para Solicitudes (entradas de stock).',
+  })
+  @IsOptional()
+  @IsDateString()
+  sinceRequests?: string;
 }
