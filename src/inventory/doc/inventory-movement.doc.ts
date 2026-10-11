@@ -11,6 +11,9 @@ export interface InventoryMovementDoc {
   productName: string;
   type: InventoryMovementType;
   quantity: number;
+  // Solo ENTRADA la llena (ver InventoryMovementsService.receive) — null
+  // en los demás tipos y en ENTRADA que todavía no se marcó RECIBIDO.
+  receivedQuantity: number | null;
   note: string | null;
   occurredAt: Date;
   status: InventoryMovementStatus;

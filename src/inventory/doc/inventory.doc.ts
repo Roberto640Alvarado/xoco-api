@@ -16,14 +16,12 @@ export interface InventoryItemDoc {
   // InventoryService.findItemsForStore).
   odooQuantity: number | null;
   // `quantity` (el último conteo real) menos lo vendido en Odoo
-  // (pos.order.line, excluyendo canceladas) y menos las mermas/
-  // regalías/degustaciones ya CONFIRMADAS, ambas desde esa fecha — "si
-  // no ha pasado nada más que eso, hoy debería haber esto". null si el
+  // (pos.order.line, excluyendo canceladas), menos las mermas/
+  // regalías/degustaciones ya CONFIRMADAS y más las entradas (envíos
+  // planta→tienda) ya CONFIRMADAS, todo desde esa misma fecha — "si no
+  // ha pasado nada más que eso, hoy debería haber esto". null si el
   // producto nunca se ha contado (no hay de dónde partir) — ver
-  // InventoryService.findItemsForStore. Todavía NO resta envíos
-  // planta->tienda (queda para un tramo futuro), así que se va a ir
-  // desviando de la realidad mientras más tiempo pase sin un recuento
-  // físico que lo corrija.
+  // InventoryService.findItemsForStore / estimateQuantity.
   estimatedQuantity: number | null;
   updatedAt: Date | null;
   updatedByEmail: string | null;

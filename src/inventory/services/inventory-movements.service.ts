@@ -2,9 +2,11 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { InventoryMovementsRepository } from '../repositories/inventory-movements.repository.js';
 import { CreateInventoryMovementDto } from '../dto/create-inventory-movement.dto.js';
+import { MarkMovementReceivedDto } from '../dto/mark-movement-received.dto.js';
 import { InventoryMovementDoc } from '../doc/inventory-movement.doc.js';
+import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.js';
 import { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
-import { InventoryMovementStatus, Role, StoreInventoryMovement } from '../../generated/prisma/index.js';
+import { InventoryMovementStatus, InventoryMovementType, Role, StoreInventoryMovement } from '../../generated/prisma/index.js';
 
 // Segundo tramo de Inventario (ver plan-history): merma, regalías y
 // degustaciones — las ventas NO pasan por acá (ver el comentario del
@@ -39,6 +41,7 @@ export class InventoryMovementsService {
       productName: name ?? 'Producto no encontrado en Odoo',
       type: movement.type,
       quantity: movement.quantity,
+      receivedQuantity: movement.receivedQuantity,
       note: movement.note,
       occurredAt: movement.occurredAt,
       status: movement.status,
@@ -82,21 +85,51 @@ export class InventoryMovementsService {
     return Promise.all(movements.map((movement) => this.toDoc(movement, namesByProductId.get(movement.productId))));
   }
 
-  // `status` siempre es CONFIRMADO o RECHAZADO acá (nunca PENDIENTE) —
-  // lo imponen los dos únicos callers (confirm/reject más abajo), no el
-  // tipo: el enum generado por Prisma no se puede acotar a un
-  // subconjunto de miembros en una posición de tipo.
+  // `status` siempre es CONFIRMADO o RECHAZADO acá (nunca PENDIENTE ni
+  // RECIBIDO) — lo imponen los dos únicos callers (confirm/reject más
+  // abajo), no el tipo: el enum generado por Prisma no se puede acotar a
+  // un subconjunto de miembros en una posición de tipo.
+  //
+  // Se puede resolver desde PENDIENTE (la mayoría de los casos: una
+  // merma/regalía/degustación reportada, o una ENTRADA que Admin/Finanzas
+  // decide confirmar sin pasar por recepción) o desde RECIBIDO (una
+  // ENTRADA que el Vendedor ya marcó como recibida, ver receive() abajo).
   private async resolve(
     id: string,
     status: InventoryMovementStatus,
     resolvedByEmail: string,
   ): Promise<InventoryMovementDoc> {
     const movement = await this.repository.findByIdOrThrow(id);
-    if (movement.status !== InventoryMovementStatus.PENDIENTE) {
+    const resolvable: InventoryMovementStatus[] = [InventoryMovementStatus.PENDIENTE, InventoryMovementStatus.RECIBIDO];
+    if (!resolvable.includes(movement.status)) {
       throw new BadRequestException('Este movimiento ya fue resuelto.');
     }
     const resolved = await this.repository.resolve(id, status, resolvedByEmail);
     return this.toDoc(resolved);
+  }
+
+  // Exclusivo de ENTRADA: el Vendedor (o Admin/Finanzas, si lo hace por
+  // él) marca que el envío llegó e ingresa la cantidad real — todavía
+  // necesita que Admin/Finanzas lo confirme o rechace después (ver
+  // resolve() arriba), por eso pasa a RECIBIDO y no a CONFIRMADO
+  // directamente.
+  async receive(
+    id: string,
+    dto: MarkMovementReceivedDto,
+    user: AuthenticatedUser,
+  ): Promise<InventoryMovementDoc> {
+    const movement = await this.repository.findByIdOrThrow(id);
+    assertOwnStoreOrThrow(user, movement.posConfigId);
+
+    if (movement.type !== InventoryMovementType.ENTRADA) {
+      throw new BadRequestException('Solo los movimientos de entrada se pueden marcar como recibidos.');
+    }
+    if (movement.status !== InventoryMovementStatus.PENDIENTE) {
+      throw new BadRequestException('Este movimiento ya fue recibido o resuelto.');
+    }
+
+    const received = await this.repository.markReceived(id, dto.receivedQuantity);
+    return this.toDoc(received);
   }
 
   confirm(id: string, resolvedByEmail: string): Promise<InventoryMovementDoc> {

@@ -8,6 +8,7 @@ import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.
 import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { InventoryMovementsService } from '../services/inventory-movements.service.js';
 import { CreateInventoryMovementDto } from '../dto/create-inventory-movement.dto.js';
+import { MarkMovementReceivedDto } from '../dto/mark-movement-received.dto.js';
 
 // Segundo tramo de Inventario (ver plan-history): merma, regalías y
 // degustaciones. A diferencia de InventoryController (conteo físico,
@@ -57,5 +58,19 @@ export class InventoryMovementsController {
   @ApiOperation({ summary: 'Rechaza un movimiento pendiente reportado por un Vendedor (ej. dato incorrecto).' })
   reject(@Param('id') id: string, @User('email') resolvedByEmail: string) {
     return this.movementsService.reject(id, resolvedByEmail);
+  }
+
+  @Patch('movements/:id/receive')
+  @ApiOperation({
+    summary: 'Marca una ENTRADA (envío planta→tienda) como recibida, con la cantidad real que llegó.',
+    description:
+      'Exclusivo de movimientos tipo ENTRADA en estado PENDIENTE. Queda en RECIBIDO, pendiente de que Admin o Finanzas lo confirme o rechace.',
+  })
+  receive(
+    @Param('id') id: string,
+    @Body() dto: MarkMovementReceivedDto,
+    @User() user: AuthenticatedUser,
+  ) {
+    return this.movementsService.receive(id, dto, user);
   }
 }

@@ -187,15 +187,19 @@ model StoreInventoryItem {
 
 // Segundo tramo de Inventario (ver plan-history): movimientos de salida
 // que NO son venta — merma (producto dañado/vencido/perdido), regalía
-// (obsequio a cliente) y degustación (muestra gratis). Las ventas no
-// pasan por aquí: esas ya se descuentan leyendo pos.order.line de Odoo
-// directamente (ver InventoryService.findUnitsSoldSince) — esta colección
-// es solo para lo que Odoo nunca sabría. "Entradas" (envíos planta→tienda)
-// quedan para un tramo futuro (ver InventoryMovementsService).
+// (obsequio a cliente), degustación (muestra gratis) y entrada (envío
+// planta→tienda). Las ventas no pasan por aquí: esas ya se descuentan
+// leyendo pos.order.line de Odoo directamente (ver
+// InventoryService.findUnitsSoldSince) — esta colección es solo para lo
+// que Odoo nunca sabría.
+//
+// ENTRADA es el único tipo que SUMA a estimatedQuantity en vez de restar
+// (ver InventoryService.estimateQuantity) — los otros tres son salidas.
 enum InventoryMovementType {
   MERMA
   REGALIA
   DEGUSTACION
+  ENTRADA
 }
 
 // PENDIENTE solo quando lo registra un VENDEDOR (necesita que Admin o
@@ -203,26 +207,41 @@ enum InventoryMovementType {
 // InventoryMovementsService.create). Cuando lo registra SUPER_ADMIN o
 // FINANZAS queda CONFIRMADO de una vez — es la misma persona que hoy
 // hace el conteo físico, no tiene sentido pedirle que se autoconfirme.
+//
+// RECIBIDO es exclusivo del flujo de ENTRADA solicitada por un Vendedor:
+// PENDIENTE (el Vendedor pidió el envío) -> RECIBIDO (el Vendedor marcó
+// que ya llegó e ingresó la cantidad real, ver
+// InventoryMovementsService.receive) -> CONFIRMADO/RECHAZADO (Admin o
+// Finanzas revisa y cierra el ciclo). Los demás tipos nunca pasan por
+// RECIBIDO — van directo de PENDIENTE a CONFIRMADO/RECHAZADO.
 enum InventoryMovementStatus {
   PENDIENTE
+  RECIBIDO
   CONFIRMADO
   RECHAZADO
 }
 
 model StoreInventoryMovement {
-  id          String                  @id @default(auto()) @map("_id") @db.ObjectId
-  posConfigId Int
-  productId   Int
-  type        InventoryMovementType
-  // Siempre positivo — unidades que SALEN del inventario de la tienda,
-  // sin importar el tipo (no hay movimientos de entrada todavía).
-  quantity    Float
-  note        String?
+  id               String                  @id @default(auto()) @map("_id") @db.ObjectId
+  posConfigId      Int
+  productId        Int
+  type             InventoryMovementType
+  // Para MERMA/REGALIA/DEGUSTACION: lo que SALE. Para ENTRADA: lo
+  // solicitado por el Vendedor (o lo registrado directo por
+  // Admin/Finanzas, si no pasó por una solicitud). Siempre positivo.
+  quantity         Float
+  // Solo ENTRADA la usa: la cantidad real que el Vendedor confirmó
+  // haber recibido (ver InventoryMovementsService.receive) — puede
+  // diferir de `quantity` si no llegó completo. null hasta que se marca
+  // RECIBIDO; estimateQuantity usa este valor sobre `quantity` en cuanto
+  // existe (ver InventoryService.estimateQuantity).
+  receivedQuantity Float?
+  note             String?
   // Cuándo pasó de verdad (no cuándo se registró en el sistema) — lo que
   // usa InventoryService para decidir si cuenta "desde el último conteo"
   // de cada producto, igual que date_order en las ventas de Odoo.
-  occurredAt  DateTime                @default(now())
-  status      InventoryMovementStatus
+  occurredAt       DateTime                @default(now())
+  status           InventoryMovementStatus
 
   registeredByEmail String
   registeredByRole  Role

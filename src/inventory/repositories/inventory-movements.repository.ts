@@ -70,4 +70,15 @@ export class InventoryMovementsRepository {
       data: { status, resolvedByEmail, resolvedAt: new Date() },
     });
   }
+
+  // Exclusivo del flujo ENTRADA: el Vendedor marca que el envío llegó e
+  // ingresa la cantidad real (ver InventoryMovementsService.receive) —
+  // todavía no resuelve el movimiento, solo lo deja listo para que
+  // Admin/Finanzas lo confirme o rechace con ese dato a la vista.
+  markReceived(id: string, receivedQuantity: number): Promise<StoreInventoryMovement> {
+    return this.prisma.storeInventoryMovement.update({
+      where: { id },
+      data: { status: InventoryMovementStatus.RECIBIDO, receivedQuantity },
+    });
+  }
 }

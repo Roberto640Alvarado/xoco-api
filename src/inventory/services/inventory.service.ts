@@ -8,7 +8,7 @@ import { InventoryRepository } from '../repositories/inventory.repository.js';
 import { InventoryMovementsRepository } from '../repositories/inventory-movements.repository.js';
 import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 import { InventoryItemDoc, InventorySavedItemDoc } from '../doc/inventory.doc.js';
-import { StoreInventoryItem, StoreInventoryMovement } from '../../generated/prisma/index.js';
+import { InventoryMovementType, StoreInventoryItem, StoreInventoryMovement } from '../../generated/prisma/index.js';
 
 // Una línea vendida en Odoo desde cierta fecha — ver findUnitsSoldSince.
 interface SoldLine {
@@ -26,9 +26,11 @@ interface SoldLine {
 // nuestra base — el API key de Odoo es de solo lectura, así que no hay
 // forma de escribir esto en Odoo como pide el diagrama del negocio ("CARGA
 // EN ODOO COMO INVENTARIO INICIAL"). `estimatedQuantity` ya descuenta
-// ventas (desde Odoo) y mermas/regalías/degustaciones CONFIRMADAS (desde
-// InventoryMovementsRepository, segundo tramo) — envíos planta→tienda
-// quedan para un tramo futuro.
+// ventas (desde Odoo) y mermas/regalías/degustaciones CONFIRMADAS, y ya
+// SUMA las entradas (envíos planta→tienda) CONFIRMADAS — todo desde
+// InventoryMovementsRepository (segundo y tercer tramo). La única pieza
+// del diagrama que vive fuera de nuestra base son los reportes Kardex/
+// Existencias, que se consultan directo en Odoo.
 @Injectable()
 export class InventoryService {
   private readonly logger = new Logger(InventoryService.name);
@@ -131,12 +133,14 @@ export class InventoryService {
 
   // `saved.quantity` (lo que se contó físicamente) menos lo vendido desde
   // ESE conteo en particular, menos las mermas/regalías/degustaciones ya
-  // CONFIRMADAS desde esa misma fecha (ver
+  // CONFIRMADAS desde esa misma fecha, MÁS las entradas (envíos
+  // planta→tienda) ya CONFIRMADAS desde esa misma fecha (ver
   // InventoryMovementsRepository.findConfirmedSince) — null si el
-  // producto nunca se ha contado. Todavía no resta envíos
-  // planta->tienda (quedan para un tramo futuro), así que puede ir
-  // quedando por debajo de la realidad mientras más tiempo pase sin un
-  // recuento físico que lo corrija.
+  // producto nunca se ha contado. ENTRADA es el único tipo que suma en
+  // vez de restar (ver movedSinceThisCount abajo); usa
+  // `receivedQuantity` (lo que el Vendedor confirmó recibir) cuando
+  // existe, y si no (una ENTRADA que Admin/Finanzas registró directo,
+  // sin pasar por el paso de recepción) cae en `quantity`.
   private estimateQuantity(
     saved: StoreInventoryItem | undefined,
     soldLinesByProduct: Map<number, SoldLine[]>,
@@ -149,7 +153,10 @@ export class InventoryService {
       .reduce((sum, line) => sum + line.qty, 0);
     const movedSinceThisCount = (movementsByProduct.get(saved.productId) ?? [])
       .filter((movement) => movement.occurredAt >= saved.updatedAt)
-      .reduce((sum, movement) => sum + movement.quantity, 0);
+      .reduce((sum, movement) => {
+        const amount = movement.receivedQuantity ?? movement.quantity;
+        return movement.type === InventoryMovementType.ENTRADA ? sum - amount : sum + amount;
+      }, 0);
     return saved.quantity - soldSinceThisCount - movedSinceThisCount;
   }
 
