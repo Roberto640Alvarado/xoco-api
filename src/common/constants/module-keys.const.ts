@@ -30,6 +30,7 @@ export const MODULE_KEYS = [
   'dashboard.categorias',
   'dashboard.cierre-mes',
   'dashboard.inventario',
+  'dashboard.inventario-movimientos',
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -67,4 +68,9 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   // Inventario: Vendedor NO entra en este primer tramo (captura
   // centralizada por Finanzas — ver plan-history de Inventario).
   'dashboard.inventario': [Role.SUPER_ADMIN, Role.FINANZAS],
+  // Segundo tramo: merma/regalías/degustaciones — Vendedor SÍ entra acá
+  // (reporta las de su propia tienda), a diferencia de
+  // 'dashboard.inventario' (el conteo físico completo, que sigue siendo
+  // solo de Admin/Finanzas).
+  'dashboard.inventario-movimientos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
 };

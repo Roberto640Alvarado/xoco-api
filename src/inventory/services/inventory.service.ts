@@ -2,24 +2,40 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { isWeightUom } from '../../common/utils/product-uom.util.js';
+import { toOdooDateTime } from '../../common/utils/store-date.util.js';
+import { OdooPosOrderState } from '../../odoo/enums/odoo-pos-order.enum.js';
 import { InventoryRepository } from '../repositories/inventory.repository.js';
+import { InventoryMovementsRepository } from '../repositories/inventory-movements.repository.js';
 import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 import { InventoryItemDoc, InventorySavedItemDoc } from '../doc/inventory.doc.js';
+import { StoreInventoryItem, StoreInventoryMovement } from '../../generated/prisma/index.js';
+
+// Una línea vendida en Odoo desde cierta fecha — ver findUnitsSoldSince.
+interface SoldLine {
+  productId: number;
+  qty: number;
+  // Formato naive de Odoo ("YYYY-MM-DD HH:mm:ss", siempre UTC) — se
+  // compara como STRING contra el mismo formato (ver estimateQuantity),
+  // nunca se parsea a Date, porque así ordena igual que Odoo sin
+  // depender de que el runtime entienda el formato naive.
+  dateOrder: string;
+}
 
 // Primer tramo del módulo Inventario (ver plan-history): inventario
 // INICIAL por tienda, capturado a mano por Finanzas. Vive enteramente en
 // nuestra base — el API key de Odoo es de solo lectura, así que no hay
 // forma de escribir esto en Odoo como pide el diagrama del negocio ("CARGA
-// EN ODOO COMO INVENTARIO INICIAL"). Movimientos posteriores (ventas,
-// mermas, regalías, envíos planta→tienda) quedan para tramos futuros —
-// por ahora esto solo guarda y muestra el conteo físico actual, con la
-// existencia de Odoo (stock.quant) como referencia/punto de partida.
+// EN ODOO COMO INVENTARIO INICIAL"). `estimatedQuantity` ya descuenta
+// ventas (desde Odoo) y mermas/regalías/degustaciones CONFIRMADAS (desde
+// InventoryMovementsRepository, segundo tramo) — envíos planta→tienda
+// quedan para un tramo futuro.
 @Injectable()
 export class InventoryService {
   private readonly logger = new Logger(InventoryService.name);
 
   constructor(
     private readonly inventoryRepository: InventoryRepository,
+    private readonly inventoryMovementsRepository: InventoryMovementsRepository,
     private readonly odooService: OdooService,
   ) {}
 
@@ -72,6 +88,71 @@ export class InventoryService {
     return byProductId;
   }
 
+  // Todo lo vendido (pos.order.line, vía sus pos.order de esta tienda)
+  // desde `sinceDate` en adelante — la mitad confiable del estimado de
+  // Inventario (a diferencia de stock.quant, esto SÍ coincide con la
+  // realidad, ver plan-history 2026-10-02). Se excluyen las órdenes
+  // canceladas (mismo criterio que SalesService). Se trae UNA vez desde
+  // la fecha más antigua entre los productos ya contados de la tienda —
+  // findItemsForStore filtra por producto en memoria contra el propio
+  // `updatedAt` de cada uno, en vez de pedir esto producto por producto.
+  private async findUnitsSoldSince(posConfigId: number, sinceDate: Date): Promise<SoldLine[]> {
+    const orders = await fetchAllOdooPages(
+      (options) => this.odooService.findPosOrders(options),
+      [
+        ['config_id', '=', posConfigId],
+        ['date_order', '>=', toOdooDateTime(sinceDate.getTime())],
+        ['state', '!=', OdooPosOrderState.CANCEL],
+      ],
+      'InventoryService.findUnitsSoldSince (órdenes)',
+      this.logger,
+    );
+    if (orders.length === 0) return [];
+
+    const dateOrderByOrderId = new Map(orders.map((order) => [order.id, order.date_order]));
+    const lines = await fetchAllOdooPages(
+      (options) => this.odooService.findPosOrderLines(options),
+      [['order_id', 'in', orders.map((order) => order.id)]],
+      'InventoryService.findUnitsSoldSince (líneas)',
+      this.logger,
+    );
+
+    const soldLines: SoldLine[] = [];
+    for (const line of lines) {
+      if (!line.product_id || !line.order_id) continue;
+      soldLines.push({
+        productId: line.product_id[0],
+        qty: line.qty,
+        dateOrder: dateOrderByOrderId.get(line.order_id[0]) ?? '',
+      });
+    }
+    return soldLines;
+  }
+
+  // `saved.quantity` (lo que se contó físicamente) menos lo vendido desde
+  // ESE conteo en particular, menos las mermas/regalías/degustaciones ya
+  // CONFIRMADAS desde esa misma fecha (ver
+  // InventoryMovementsRepository.findConfirmedSince) — null si el
+  // producto nunca se ha contado. Todavía no resta envíos
+  // planta->tienda (quedan para un tramo futuro), así que puede ir
+  // quedando por debajo de la realidad mientras más tiempo pase sin un
+  // recuento físico que lo corrija.
+  private estimateQuantity(
+    saved: StoreInventoryItem | undefined,
+    soldLinesByProduct: Map<number, SoldLine[]>,
+    movementsByProduct: Map<number, StoreInventoryMovement[]>,
+  ): number | null {
+    if (!saved) return null;
+    const sinceThisCount = toOdooDateTime(saved.updatedAt.getTime());
+    const soldSinceThisCount = (soldLinesByProduct.get(saved.productId) ?? [])
+      .filter((line) => line.dateOrder >= sinceThisCount)
+      .reduce((sum, line) => sum + line.qty, 0);
+    const movedSinceThisCount = (movementsByProduct.get(saved.productId) ?? [])
+      .filter((movement) => movement.occurredAt >= saved.updatedAt)
+      .reduce((sum, movement) => sum + movement.quantity, 0);
+    return saved.quantity - soldSinceThisCount - movedSinceThisCount;
+  }
+
   // Catálogo completo de Odoo (activo) cruzado con lo ya capturado en
   // Mongo para esta tienda, más la existencia de Odoo como referencia. Se
   // trae TODO el catálogo, sin importar si el producto ya tiene cantidad
@@ -94,6 +175,31 @@ export class InventoryService {
 
     const savedByProductId = new Map(savedItems.map((item) => [item.productId, item]));
 
+    // Una sola consulta de ventas desde el conteo MÁS ANTIGUO de la
+    // tienda — cada producto filtra de ahí lo que le corresponde según
+    // su propio `updatedAt` en estimateQuantity.
+    const earliestCountedAt = savedItems.length
+      ? new Date(Math.min(...savedItems.map((item) => item.updatedAt.getTime())))
+      : null;
+    const [soldLines, confirmedMovements] = await Promise.all([
+      earliestCountedAt ? this.findUnitsSoldSince(posConfigId, earliestCountedAt) : Promise.resolve([]),
+      earliestCountedAt
+        ? this.inventoryMovementsRepository.findConfirmedSince(posConfigId, earliestCountedAt)
+        : Promise.resolve([]),
+    ]);
+    const soldLinesByProduct = new Map<number, SoldLine[]>();
+    for (const line of soldLines) {
+      const list = soldLinesByProduct.get(line.productId) ?? [];
+      list.push(line);
+      soldLinesByProduct.set(line.productId, list);
+    }
+    const movementsByProduct = new Map<number, StoreInventoryMovement[]>();
+    for (const movement of confirmedMovements) {
+      const list = movementsByProduct.get(movement.productId) ?? [];
+      list.push(movement);
+      movementsByProduct.set(movement.productId, list);
+    }
+
     return products
       .map((product): InventoryItemDoc => {
         const saved = savedByProductId.get(product.id);
@@ -102,6 +208,7 @@ export class InventoryService {
           productName: product.display_name,
           unit: isWeightUom(product.uom_id) ? 'kg' : 'unidad',
           quantity: saved ? saved.quantity : null,
+          estimatedQuantity: this.estimateQuantity(saved, soldLinesByProduct, movementsByProduct),
           odooQuantity: odooQuantitiesByProduct.get(product.id) ?? null,
           updatedAt: saved ? saved.updatedAt : null,
           updatedByEmail: saved ? saved.updatedByEmail : null,

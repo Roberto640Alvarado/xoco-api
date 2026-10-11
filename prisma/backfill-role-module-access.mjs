@@ -56,6 +56,10 @@ const MODULE_ROLE_CEILING = [
   // Inventario: Vendedor NO entra en este primer tramo (captura
   // centralizada por Finanzas — ver plan-history de Inventario).
   { moduleKey: 'dashboard.inventario', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
+  // Segundo tramo: Vendedor sí entra a merma/regalías/degustaciones (ver
+  // module-keys.const.ts) — se siembra para que el panel Permisos y
+  // /auth/me lo incluyan desde el día 1.
+  { moduleKey: 'dashboard.inventario-movimientos', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
 ];
 
 async function main() {

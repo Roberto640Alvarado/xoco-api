@@ -49,7 +49,12 @@ function storeDayStartUtcMs(date: string): number {
 }
 
 // Date -> el formato naive que espera Odoo en un domain ("YYYY-MM-DD HH:mm:ss").
-function toOdooDateTime(utcMs: number): string {
+// Exportada (no solo de uso interno de este archivo): InventoryService la
+// usa para convertir un `updatedAt` exacto de Mongo al string que Odoo
+// espera en un domain de `date_order`, sin pasar por el redondeo a día
+// completo de storeDayRangeToUtc (ahí sí importa la hora exacta, no el
+// día de negocio).
+export function toOdooDateTime(utcMs: number): string {
   return new Date(utcMs).toISOString().slice(0, 19).replace('T', ' ');
 }
 
