@@ -27,6 +27,36 @@ export class OdooConfigResponseDoc {
   updatedAt: Date;
 }
 
+// Una fila del historial de keys (Administración → Integración con Odoo).
+export class OdooConfigHistoryItemDoc {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty({ example: '5c3c****...c391' })
+  apiKeyMasked: string;
+
+  @ApiProperty()
+  uid: number;
+
+  @ApiProperty()
+  durationDays: number;
+
+  @ApiProperty({ description: 'Cuándo se registró la key.' })
+  createdAt: Date;
+
+  @ApiProperty()
+  expiresAt: Date;
+
+  @ApiProperty({ description: 'true solo en la key que usa el panel ahora.' })
+  isActive: boolean;
+
+  @ApiProperty()
+  isExpired: boolean;
+
+  @ApiProperty({ nullable: true, type: String })
+  createdByEmail: string | null;
+}
+
 export function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) {
     return '*'.repeat(apiKey.length);

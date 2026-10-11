@@ -41,8 +41,8 @@ model User {
 // (ver ejemplo de JSON-RPC que compartiste). `expiresAt` se calcula al
 // crear/rotar la key como now() + durationDays.
 //
-// TODO: estructura sujeta a cambio cuando definas el flujo completo de
-// rotación desde el panel (ej. si se guarda historial de keys viejas).
+// Cada rotación crea un documento nuevo y deja el anterior con isActive=false:
+// así queda el historial de keys (Administración → Integración con Odoo).
 model OdooConfig {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId
   apiKey       String
@@ -50,6 +50,8 @@ model OdooConfig {
   durationDays Int      @default(30)
   expiresAt    DateTime
   isActive     Boolean  @default(true)
+  // Quién registró esta key (null en las anteriores al historial o al seed).
+  createdByEmail String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

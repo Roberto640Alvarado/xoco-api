@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OdooConfigRepository } from '../repositories/odoo-config.repository.js';
 import { RotateOdooConfigDto } from '../dto/rotate-odoo-config.dto.js';
-import { maskApiKey, OdooConfigResponseDoc } from '../doc/odoo-config-response.doc.js';
+import { maskApiKey, OdooConfigHistoryItemDoc, OdooConfigResponseDoc } from '../doc/odoo-config-response.doc.js';
 
 // Administración del API key de Odoo (solo SUPER_ADMIN, ver
 // OdooConfigController) — separado de OdooService (que solo LEE la config
@@ -25,12 +25,11 @@ export class OdooConfigService {
     };
   }
 
-  async rotate(dto: RotateOdooConfigDto): Promise<OdooConfigResponseDoc> {
-    const config = await this.odooConfigRepository.rotate({
-      apiKey: dto.apiKey,
-      uid: dto.uid,
-      durationDays: dto.durationDays,
-    });
+  async rotate(dto: RotateOdooConfigDto, createdByEmail: string | null): Promise<OdooConfigResponseDoc> {
+    const config = await this.odooConfigRepository.rotate(
+      { apiKey: dto.apiKey, uid: dto.uid, durationDays: dto.durationDays },
+      createdByEmail,
+    );
 
     return {
       apiKeyMasked: maskApiKey(config.apiKey),
@@ -41,5 +40,20 @@ export class OdooConfigService {
       isActive: config.isActive,
       updatedAt: config.updatedAt,
     };
+  }
+
+  async getHistory(): Promise<OdooConfigHistoryItemDoc[]> {
+    const rows = await this.odooConfigRepository.findAll();
+    return rows.map((row) => ({
+      id: row.id,
+      apiKeyMasked: maskApiKey(row.apiKey),
+      uid: row.uid,
+      durationDays: row.durationDays,
+      createdAt: row.createdAt,
+      expiresAt: row.expiresAt,
+      isActive: row.isActive,
+      isExpired: row.expiresAt.getTime() <= Date.now(),
+      createdByEmail: row.createdByEmail ?? null,
+    }));
   }
 }

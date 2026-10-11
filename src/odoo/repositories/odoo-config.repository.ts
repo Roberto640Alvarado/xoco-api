@@ -20,34 +20,33 @@ export class OdooConfigRepository {
     });
   }
 
-  // Un solo documento "vivo" por ahora (ver TODO en schema.prisma sobre
-  // guardar historial más adelante): si ya hay uno activo, se rota
-  // (update); si no, se crea. Igual que hace prisma/seed.mjs.
-  async rotate(data: RotateOdooConfigData) {
+  // Historial completo: la key activa y las reemplazadas, la más nueva primero.
+  findAll() {
+    return this.prisma.odooConfig.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  // Cada rotación crea un documento nuevo y deja el anterior inactivo, así
+  // queda registro de las keys pasadas. Se crea primero la nueva y luego se
+  // desactivan las demás: nunca hay un instante sin key activa.
+  async rotate(data: RotateOdooConfigData, createdByEmail: string | null) {
     const expiresAt = new Date(Date.now() + data.durationDays * 24 * 60 * 60 * 1000);
-    const existing = await this.findActive();
 
-    if (existing) {
-      return this.prisma.odooConfig.update({
-        where: { id: existing.id },
-        data: {
-          apiKey: data.apiKey,
-          uid: data.uid,
-          durationDays: data.durationDays,
-          expiresAt,
-          isActive: true,
-        },
-      });
-    }
-
-    return this.prisma.odooConfig.create({
+    const created = await this.prisma.odooConfig.create({
       data: {
         apiKey: data.apiKey,
         uid: data.uid,
         durationDays: data.durationDays,
         expiresAt,
         isActive: true,
+        createdByEmail,
       },
     });
+
+    await this.prisma.odooConfig.updateMany({
+      where: { isActive: true, id: { not: created.id } },
+      data: { isActive: false },
+    });
+
+    return created;
   }
 }
