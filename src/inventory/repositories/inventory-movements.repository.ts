@@ -62,6 +62,35 @@ export class InventoryMovementsRepository {
     });
   }
 
+  // Cuántos movimientos hay en alguno de estos estados — de una tienda, o de
+  // todas si no se pasa `posConfigId` (aviso de pendientes de Admin/Finanzas).
+  countByStatuses(statuses: InventoryMovementStatus[], posConfigId?: number): Promise<number> {
+    return this.prisma.storeInventoryMovement.count({
+      where: { status: { in: statuses }, ...(posConfigId === undefined ? {} : { posConfigId }) },
+    });
+  }
+
+  // Entradas (envíos planta→tienda) de la tienda que siguen esperando que el
+  // Vendedor las marque como recibidas.
+  countPendingEntradas(posConfigId: number): Promise<number> {
+    return this.prisma.storeInventoryMovement.count({
+      where: { posConfigId, type: InventoryMovementType.ENTRADA, status: InventoryMovementStatus.PENDIENTE },
+    });
+  }
+
+  // Lo que `registeredByEmail` reportó y Admin/Finanzas ya confirmó o
+  // rechazó después de `since` — el aviso de "resuelto" del Vendedor.
+  countResolvedSince(posConfigId: number, registeredByEmail: string, since: Date): Promise<number> {
+    return this.prisma.storeInventoryMovement.count({
+      where: {
+        posConfigId,
+        registeredByEmail,
+        status: { in: [InventoryMovementStatus.CONFIRMADO, InventoryMovementStatus.RECHAZADO] },
+        resolvedAt: { gt: since },
+      },
+    });
+  }
+
   async findByIdOrThrow(id: string): Promise<StoreInventoryMovement> {
     const movement = await this.prisma.storeInventoryMovement.findUnique({ where: { id } });
     if (!movement) throw new NotFoundException('Movimiento no encontrado.');

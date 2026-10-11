@@ -4,6 +4,7 @@ import { InventoryMovementsRepository } from '../repositories/inventory-movement
 import { CreateInventoryMovementDto } from '../dto/create-inventory-movement.dto.js';
 import { MarkMovementReceivedDto } from '../dto/mark-movement-received.dto.js';
 import { InventoryMovementDoc } from '../doc/inventory-movement.doc.js';
+import { InventoryMovementNotificationsDoc } from '../doc/inventory-movement-notifications.doc.js';
 import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.js';
 import { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { InventoryMovementStatus, InventoryMovementType, Role, StoreInventoryMovement } from '../../generated/prisma/index.js';
@@ -130,6 +131,29 @@ export class InventoryMovementsService {
 
     const received = await this.repository.markReceived(id, dto.receivedQuantity);
     return this.toDoc(received);
+  }
+
+  // Contadores del aviso del menú (Inventario → Movimientos). Admin/Finanzas
+  // ven cuánto les falta por confirmar o rechazar (todas las tiendas);
+  // el Vendedor ve los envíos que le faltan por recibir en su tienda más lo
+  // que Admin/Finanzas resolvió de lo suyo desde `since`.
+  async findNotifications(user: AuthenticatedUser, since?: Date): Promise<InventoryMovementNotificationsDoc> {
+    if (user.role !== Role.VENDEDOR) {
+      const toResolve = await this.repository.countByStatuses([
+        InventoryMovementStatus.PENDIENTE,
+        InventoryMovementStatus.RECIBIDO,
+      ]);
+      return { total: toResolve, toResolve, toReceive: 0, resolvedUnseen: 0 };
+    }
+
+    if (user.posConfigId == null) return { total: 0, toResolve: 0, toReceive: 0, resolvedUnseen: 0 };
+
+    const sinceDate = since ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [toReceive, resolvedUnseen] = await Promise.all([
+      this.repository.countPendingEntradas(user.posConfigId),
+      this.repository.countResolvedSince(user.posConfigId, user.email, sinceDate),
+    ]);
+    return { total: toReceive + resolvedUnseen, toResolve: 0, toReceive, resolvedUnseen };
   }
 
   confirm(id: string, resolvedByEmail: string): Promise<InventoryMovementDoc> {

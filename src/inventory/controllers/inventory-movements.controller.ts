@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '../../generated/prisma/index.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.inte
 import { InventoryMovementsService } from '../services/inventory-movements.service.js';
 import { CreateInventoryMovementDto } from '../dto/create-inventory-movement.dto.js';
 import { MarkMovementReceivedDto } from '../dto/mark-movement-received.dto.js';
+import { FindMovementNotificationsQueryDto } from '../dto/find-movement-notifications-query.dto.js';
 
 // Segundo tramo de Inventario (ver plan-history): merma, regalías y
 // degustaciones. A diferencia de InventoryController (conteo físico,
@@ -44,6 +45,16 @@ export class InventoryMovementsController {
   findManyForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number, @User() user: AuthenticatedUser) {
     assertOwnStoreOrThrow(user, posConfigId);
     return this.movementsService.findManyForStore(posConfigId);
+  }
+
+  @Get('movements/notifications')
+  @ApiOperation({
+    summary: 'Contadores de avisos de movimientos para el menú (pendientes por confirmar / por recibir / resueltos).',
+    description:
+      'Admin/Finanzas: movimientos de todas las tiendas esperando confirmación. Vendedor: entradas por recibir en su tienda y lo suyo ya resuelto desde `since`.',
+  })
+  findNotifications(@Query() query: FindMovementNotificationsQueryDto, @User() user: AuthenticatedUser) {
+    return this.movementsService.findNotifications(user, query.since ? new Date(query.since) : undefined);
   }
 
   @Patch('movements/:id/confirm')
