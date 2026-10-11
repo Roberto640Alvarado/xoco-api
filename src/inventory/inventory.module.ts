@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { OdooModule } from '../odoo/odoo.module.js';
 import { InventoryController } from './controllers/inventory.controller.js';
 import { InventoryMovementsController } from './controllers/inventory-movements.controller.js';
+import { InventoryAccessController } from './controllers/inventory-access.controller.js';
+import { InventoryAccessService } from './services/inventory-access.service.js';
+import { InventoryAccessRepository } from './repositories/inventory-access.repository.js';
 import { InventoryService } from './services/inventory.service.js';
 import { InventoryLedgerService } from './services/inventory-ledger.service.js';
 import { InventoryMovementsService } from './services/inventory-movements.service.js';
@@ -10,7 +13,15 @@ import { InventoryMovementsRepository } from './repositories/inventory-movements
 
 @Module({
   imports: [OdooModule],
-  controllers: [InventoryController, InventoryMovementsController],
-  providers: [InventoryService, InventoryLedgerService, InventoryMovementsService, InventoryRepository, InventoryMovementsRepository],
+  controllers: [InventoryController, InventoryMovementsController, InventoryAccessController],
+  providers: [
+    InventoryService,
+    InventoryLedgerService,
+    InventoryMovementsService,
+    InventoryAccessService,
+    InventoryRepository,
+    InventoryMovementsRepository,
+    InventoryAccessRepository,
+  ],
 })
 export class InventoryModule {}

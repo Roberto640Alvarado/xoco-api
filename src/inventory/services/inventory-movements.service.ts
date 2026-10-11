@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { InventoryMovementsRepository } from '../repositories/inventory-movements.repository.js';
+import { InventoryAccessService } from './inventory-access.service.js';
 import { CreateInventoryMovementDto } from '../dto/create-inventory-movement.dto.js';
 import { MarkMovementReceivedDto } from '../dto/mark-movement-received.dto.js';
 import { RejectMovementDto } from '../dto/reject-movement.dto.js';
@@ -21,6 +22,7 @@ export class InventoryMovementsService {
   constructor(
     private readonly repository: InventoryMovementsRepository,
     private readonly odooService: OdooService,
+    private readonly accessService: InventoryAccessService,
   ) {}
 
   // Resuelve el nombre de los productos de un lote de movimientos en UNA
@@ -175,6 +177,7 @@ export class InventoryMovementsService {
   ): Promise<InventoryMovementDoc> {
     const movement = await this.repository.findByIdOrThrow(id);
     assertOwnStoreOrThrow(user, movement.posConfigId);
+    await this.accessService.assertEnabledFor(user, movement.posConfigId);
 
     if (movement.type !== InventoryMovementType.ENTRADA) {
       throw new BadRequestException('Solo los movimientos de entrada se pueden marcar como recibidos.');
@@ -207,7 +210,11 @@ export class InventoryMovementsService {
       return { total: movements + requests, movements, requests };
     }
 
-    if (user.posConfigId == null) return { total: 0, movements: 0, requests: 0 };
+    // Sin tienda, o con Inventario todavía no habilitado para ella, el
+    // Vendedor no ve avisos (tampoco la sección).
+    if (user.posConfigId == null || !(await this.accessService.isEnabledFor(user, user.posConfigId))) {
+      return { total: 0, movements: 0, requests: 0 };
+    }
 
     const defaultSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const [movements, inTransit, requestsResolved] = await Promise.all([

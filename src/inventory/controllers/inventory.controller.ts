@@ -8,6 +8,7 @@ import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.
 import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { InventoryLedgerService } from '../services/inventory-ledger.service.js';
+import { InventoryAccessService } from '../services/inventory-access.service.js';
 import { FindInventoryLedgerQueryDto } from '../dto/find-inventory-ledger-query.dto.js';
 import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 
@@ -24,6 +25,7 @@ export class InventoryController {
   constructor(
     private readonly inventoryService: InventoryService,
     private readonly ledgerService: InventoryLedgerService,
+    private readonly accessService: InventoryAccessService,
   ) {}
 
   @Get('stores/:posConfigId/items')
@@ -32,8 +34,9 @@ export class InventoryController {
     description:
       'Trae TODO product.product activo de Odoo (solo lectura) y lo cruza con lo guardado en nuestra base para esta tienda. quantity=null significa que ese producto todavía no se ha contado. estimatedQuantity es el conteo físico menos ventas y mermas/regalías/degustaciones, más entradas confirmadas desde ese conteo.',
   })
-  findItemsForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number, @User() user: AuthenticatedUser) {
+  async findItemsForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number, @User() user: AuthenticatedUser) {
     assertOwnStoreOrThrow(user, posConfigId);
+    await this.accessService.assertEnabledFor(user, posConfigId);
     return this.inventoryService.findItemsForStore(posConfigId);
   }
 
@@ -56,12 +59,13 @@ export class InventoryController {
     description:
       'Une ventas de Odoo (una línea por producto vendido), merma/regalía/degustación/entrada y conteos físicos. Filtra por rango de días (hora local de la tienda), producto y tipo.',
   })
-  findLedger(
+  async findLedger(
     @Param('posConfigId', ParseIntPipe) posConfigId: number,
     @Query() query: FindInventoryLedgerQueryDto,
     @User() user: AuthenticatedUser,
   ) {
     assertOwnStoreOrThrow(user, posConfigId);
+    await this.accessService.assertEnabledFor(user, posConfigId);
     return this.ledgerService.findLedger(posConfigId, query);
   }
 }

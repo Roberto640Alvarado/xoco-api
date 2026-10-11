@@ -7,6 +7,7 @@ import { RequiresModule } from '../../common/decorators/requires-module.decorato
 import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.js';
 import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { InventoryMovementsService } from '../services/inventory-movements.service.js';
+import { InventoryAccessService } from '../services/inventory-access.service.js';
 import { CreateInventoryMovementDto } from '../dto/create-inventory-movement.dto.js';
 import { MarkMovementReceivedDto } from '../dto/mark-movement-received.dto.js';
 import { FindMovementNotificationsQueryDto } from '../dto/find-movement-notifications-query.dto.js';
@@ -25,7 +26,10 @@ import { RejectMovementDto } from '../dto/reject-movement.dto.js';
 @RequiresModule('dashboard.inventario-movimientos')
 @Controller('inventory')
 export class InventoryMovementsController {
-  constructor(private readonly movementsService: InventoryMovementsService) {}
+  constructor(
+    private readonly movementsService: InventoryMovementsService,
+    private readonly accessService: InventoryAccessService,
+  ) {}
 
   @Post('stores/:posConfigId/movements')
   @ApiOperation({
@@ -33,19 +37,21 @@ export class InventoryMovementsController {
     description:
       'Si lo registra SUPER_ADMIN o FINANZAS queda confirmado de inmediato. Si lo registra VENDEDOR queda pendiente hasta que Admin/Finanzas lo confirme o rechace.',
   })
-  create(
+  async create(
     @Param('posConfigId', ParseIntPipe) posConfigId: number,
     @Body() dto: CreateInventoryMovementDto,
     @User() user: AuthenticatedUser,
   ) {
     assertOwnStoreOrThrow(user, posConfigId);
+    await this.accessService.assertEnabledFor(user, posConfigId);
     return this.movementsService.create(posConfigId, dto, user);
   }
 
   @Get('stores/:posConfigId/movements')
   @ApiOperation({ summary: 'Historial de movimientos (merma/regalía/degustación) de una tienda, más recientes primero.' })
-  findManyForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number, @User() user: AuthenticatedUser) {
+  async findManyForStore(@Param('posConfigId', ParseIntPipe) posConfigId: number, @User() user: AuthenticatedUser) {
     assertOwnStoreOrThrow(user, posConfigId);
+    await this.accessService.assertEnabledFor(user, posConfigId);
     return this.movementsService.findManyForStore(posConfigId);
   }
 
