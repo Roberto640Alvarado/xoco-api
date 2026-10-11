@@ -54,6 +54,14 @@ export class InventoryMovementsRepository {
     });
   }
 
+  // Todos los movimientos (cualquier estado) dentro de [from, to] — el
+  // Registro de entradas y salidas los muestra todos, con su estado.
+  findForLedger(posConfigId: number, from: Date, to: Date, productId?: number): Promise<StoreInventoryMovement[]> {
+    return this.prisma.storeInventoryMovement.findMany({
+      where: { posConfigId, occurredAt: { gte: from, lte: to }, ...(productId ? { productId } : {}) },
+    });
+  }
+
   async findByIdOrThrow(id: string): Promise<StoreInventoryMovement> {
     const movement = await this.prisma.storeInventoryMovement.findUnique({ where: { id } });
     if (!movement) throw new NotFoundException('Movimiento no encontrado.');

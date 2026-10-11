@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
 
+export interface CreateCountLogData {
+  posConfigId: number;
+  productId: number;
+  quantity: number;
+  previousQuantity: number | null;
+  countedByEmail: string;
+}
+
 export interface UpsertInventoryItemData {
   posConfigId: number;
   productId: number;
@@ -38,5 +46,17 @@ export class InventoryRepository {
   // mismo criterio que GoalsRepository.upsertMany.
   upsertMany(entries: UpsertInventoryItemData[]) {
     return Promise.all(entries.map((entry) => this.upsert(entry)));
+  }
+
+  createCountLogs(entries: CreateCountLogData[]) {
+    return this.prisma.storeInventoryCountLog.createMany({ data: entries });
+  }
+
+  // Conteos de la tienda dentro de [from, to] — alimenta el Registro de
+  // entradas y salidas (InventoryLedgerService).
+  findCountLogs(posConfigId: number, from: Date, to: Date, productId?: number) {
+    return this.prisma.storeInventoryCountLog.findMany({
+      where: { posConfigId, countedAt: { gte: from, lte: to }, ...(productId ? { productId } : {}) },
+    });
   }
 }

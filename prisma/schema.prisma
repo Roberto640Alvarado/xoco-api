@@ -255,3 +255,23 @@ model StoreInventoryMovement {
 
   @@map("store_inventory_movements")
 }
+
+// Historial de conteos físicos: StoreInventoryItem solo guarda el valor
+// ACTUAL (se sobreescribe), así que cada vez que Finanzas guarda un
+// conteo se agrega aquí una fila — alimenta el "Registro" de entradas y
+// salidas por tienda (ver InventoryLedgerService). Solo existe desde que se
+// creó este modelo: los conteos anteriores no tienen historial.
+model StoreInventoryCountLog {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  posConfigId      Int
+  productId        Int
+  quantity         Float
+  // Lo que había guardado justo antes de este conteo — null si era el
+  // primer conteo de ese producto en esa tienda.
+  previousQuantity Float?
+  countedAt        DateTime @default(now())
+  countedByEmail   String
+
+  @@index([posConfigId, countedAt])
+  @@map("store_inventory_count_logs")
+}

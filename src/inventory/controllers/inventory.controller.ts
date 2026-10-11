@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '../../generated/prisma/index.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { User } from '../../common/decorators/user.decorator.js';
 import { RequiresModule } from '../../common/decorators/requires-module.decorator.js';
 import { InventoryService } from '../services/inventory.service.js';
+import { InventoryLedgerService } from '../services/inventory-ledger.service.js';
+import { FindInventoryLedgerQueryDto } from '../dto/find-inventory-ledger-query.dto.js';
 import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 
 // Inventario por tienda — a diferencia de Goals/Sales, Vendedor NO tiene
@@ -17,7 +19,10 @@ import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 @RequiresModule('dashboard.inventario')
 @Controller('inventory')
 export class InventoryController {
-  constructor(private readonly inventoryService: InventoryService) {}
+  constructor(
+    private readonly inventoryService: InventoryService,
+    private readonly ledgerService: InventoryLedgerService,
+  ) {}
 
   @Get('stores/:posConfigId/items')
   @ApiOperation({
@@ -39,5 +44,15 @@ export class InventoryController {
     @User('email') updatedByEmail: string,
   ) {
     return this.inventoryService.upsertBulk(posConfigId, dto, updatedByEmail);
+  }
+
+  @Get('stores/:posConfigId/ledger')
+  @ApiOperation({
+    summary: 'Registro de entradas y salidas de una tienda, con fecha y hora, más recientes primero.',
+    description:
+      'Une ventas de Odoo (una línea por producto vendido), merma/regalía/degustación/entrada y conteos físicos. Filtra por rango de días (hora local de la tienda), producto y tipo.',
+  })
+  findLedger(@Param('posConfigId', ParseIntPipe) posConfigId: number, @Query() query: FindInventoryLedgerQueryDto) {
+    return this.ledgerService.findLedger(posConfigId, query);
   }
 }

@@ -176,12 +176,27 @@ export class InventoryService {
     dto: UpsertInventoryBulkDto,
     updatedByEmail: string,
   ): Promise<InventorySavedItemDoc[]> {
+    // Cantidad que había guardada justo antes — para el historial de
+    // conteos (Registro de entradas y salidas).
+    const previous = new Map(
+      (await this.inventoryRepository.findManyForStore(posConfigId)).map((item) => [item.productId, item.quantity]),
+    );
     const saved = await this.inventoryRepository.upsertMany(
       dto.entries.map((entry) => ({
         posConfigId,
         productId: entry.productId,
         quantity: entry.quantity,
         updatedByEmail,
+      })),
+    );
+
+    await this.inventoryRepository.createCountLogs(
+      dto.entries.map((entry) => ({
+        posConfigId,
+        productId: entry.productId,
+        quantity: entry.quantity,
+        previousQuantity: previous.get(entry.productId) ?? null,
+        countedByEmail: updatedByEmail,
       })),
     );
 
