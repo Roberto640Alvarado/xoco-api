@@ -9,12 +9,6 @@ export interface InventoryItemDoc {
   productName: string;
   unit: InventoryUnit;
   quantity: number | null;
-  // Existencia que reporta Odoo (stock.quant) para la bodega de esta
-  // tienda, SOLO como referencia/punto de partida — null si el
-  // pos.config no tiene bodega mapeada o Odoo no reporta nada para ese
-  // producto ahí. Nunca se usa como fuente de verdad (ver
-  // InventoryService.findItemsForStore).
-  odooQuantity: number | null;
   // `quantity` (el último conteo real) menos lo vendido en Odoo
   // (pos.order.line, excluyendo canceladas), menos las mermas/
   // regalías/degustaciones ya CONFIRMADAS y más las entradas (envíos

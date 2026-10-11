@@ -41,55 +41,6 @@ export class InventoryService {
     private readonly odooService: OdooService,
   ) {}
 
-  // Ubicación de existencias REAL de la tienda, o null si no se pudo
-  // resolver (no es un error: simplemente no hay existencia de Odoo que
-  // sugerir). Se va por `picking_type_id` del pos.config en vez de
-  // `warehouse_id` — se verificó en vivo contra el Odoo del negocio
-  // (2026-09-28) que `warehouse_id` puede estar mal configurado (3 de 4
-  // tiendas apuntaban todas a la bodega "Plaza Centrika") mientras que el
-  // `picking_type_id` de cada una sí reflejaba correctamente su propia
-  // tienda, con `default_location_src_id` apuntando a su ubicación real
-  // de existencias (ej. "SB/Existencias" para San Benito) — es de ahí de
-  // donde Odoo realmente descuenta cuando se vende en esa tienda.
-  private async findStockLocationId(posConfigId: number): Promise<number | null> {
-    const posConfigs = await this.odooService.findPosConfigs({
-      domain: [['id', '=', posConfigId]],
-      limit: 1,
-    });
-    const posConfig = posConfigs[0];
-    if (!posConfig?.picking_type_id) return null;
-
-    const pickingTypes = await this.odooService.findPickingTypes({
-      domain: [['id', '=', posConfig.picking_type_id[0]]],
-      limit: 1,
-    });
-    const pickingType = pickingTypes[0];
-    if (!pickingType?.default_location_src_id) return null;
-
-    return pickingType.default_location_src_id[0];
-  }
-
-  // Suma de existencia (on hand) por producto, para TODAS las
-  // ubicaciones dentro de la bodega de esta tienda (child_of la ubicación
-  // raíz "Stock" de esa bodega) — así no se pierden sub-ubicaciones
-  // (estantes, zonas) que Odoo pueda tener bajo la bodega.
-  private async findOdooQuantitiesByProduct(stockLocationId: number): Promise<Map<number, number>> {
-    const quants = await fetchAllOdooPages(
-      (options) => this.odooService.findStockQuants(options),
-      [['location_id', 'child_of', stockLocationId]],
-      'InventoryService.findOdooQuantitiesByProduct (stock.quant)',
-      this.logger,
-    );
-
-    const byProductId = new Map<number, number>();
-    for (const quant of quants) {
-      if (!quant.product_id) continue;
-      const [productId] = quant.product_id;
-      byProductId.set(productId, (byProductId.get(productId) ?? 0) + quant.quantity);
-    }
-    return byProductId;
-  }
-
   // Todo lo vendido (pos.order.line, vía sus pos.order de esta tienda)
   // desde `sinceDate` en adelante — la mitad confiable del estimado de
   // Inventario (a diferencia de stock.quant, esto SÍ coincide con la
@@ -161,11 +112,13 @@ export class InventoryService {
   }
 
   // Catálogo completo de Odoo (activo) cruzado con lo ya capturado en
-  // Mongo para esta tienda, más la existencia de Odoo como referencia. Se
+  // Mongo para esta tienda. La existencia de Odoo (stock.quant) NO se usa:
+  // Odoo solo ve las ventas del POS, nunca las entradas ni los ajustes, así
+  // que sus cantidades quedan negativas y no sirven ni de referencia. Se
   // trae TODO el catálogo, sin importar si el producto ya tiene cantidad
   // guardada o no, para que Finanzas vea de una vez qué falta por contar.
   async findItemsForStore(posConfigId: number): Promise<InventoryItemDoc[]> {
-    const [products, savedItems, stockLocationId] = await Promise.all([
+    const [products, savedItems] = await Promise.all([
       fetchAllOdooPages(
         (options) => this.odooService.findProducts(options),
         [],
@@ -173,12 +126,7 @@ export class InventoryService {
         this.logger,
       ),
       this.inventoryRepository.findManyForStore(posConfigId),
-      this.findStockLocationId(posConfigId),
     ]);
-
-    const odooQuantitiesByProduct = stockLocationId
-      ? await this.findOdooQuantitiesByProduct(stockLocationId)
-      : new Map<number, number>();
 
     const savedByProductId = new Map(savedItems.map((item) => [item.productId, item]));
 
@@ -216,7 +164,6 @@ export class InventoryService {
           unit: isWeightUom(product.uom_id) ? 'kg' : 'unidad',
           quantity: saved ? saved.quantity : null,
           estimatedQuantity: this.estimateQuantity(saved, soldLinesByProduct, movementsByProduct),
-          odooQuantity: odooQuantitiesByProduct.get(product.id) ?? null,
           updatedAt: saved ? saved.updatedAt : null,
           updatedByEmail: saved ? saved.updatedByEmail : null,
         };

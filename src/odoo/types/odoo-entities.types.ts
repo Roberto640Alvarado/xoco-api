@@ -182,29 +182,3 @@ export interface OdooPosPaymentGroup {
   payment_method_id?: OdooMany2One;
   amount?: number;
 }
-
-// stock.picking.type — se pide para resolver, a partir del
-// picking_type_id de un pos.config, la ubicación de existencias REAL de
-// esa tienda (default_location_src_id: de dónde sale el stock cuando se
-// vende ahí), y así poder filtrar stock.quant (ver InventoryService —
-// Inventario usa esto como referencia de existencia de Odoo, no como
-// fuente de verdad). Se usa esto y no `pos.config.warehouse_id` porque
-// ese campo puede estar mal configurado en Odoo sin que el punto de
-// venta deje de vender correctamente contra su propia ubicación.
-export interface OdooPickingType {
-  id: number;
-  name: string;
-  warehouse_id: OdooMany2One;
-  default_location_src_id: OdooMany2One;
-}
-
-// stock.quant — una fila por (producto, ubicación). `quantity` es la
-// existencia física en esa ubicación (on hand); no se pide
-// `reserved_quantity` porque Inventario solo usa esto como referencia de
-// punto de partida, no para reservas/disponibilidad exacta.
-export interface OdooStockQuant {
-  id: number;
-  product_id: OdooMany2One;
-  location_id: OdooMany2One;
-  quantity: number;
-}
