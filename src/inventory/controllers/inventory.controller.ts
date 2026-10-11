@@ -28,6 +28,9 @@ export class InventoryController {
     private readonly accessService: InventoryAccessService,
   ) {}
 
+  // Las pantallas de Solicitudes y Movimientos eligen el producto de esta
+  // lista: basta con tener Conteo y Registro o Movimientos y solicitudes.
+  @RequiresModule('dashboard.inventario', 'dashboard.inventario-movimientos')
   @Get('stores/:posConfigId/items')
   @ApiOperation({
     summary: 'Catálogo completo de Odoo cruzado con el inventario ya capturado para una tienda.',

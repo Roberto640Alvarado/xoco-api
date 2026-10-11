@@ -37,15 +37,11 @@ const MODULE_ROLE_CEILING = [
   { moduleKey: 'dashboard.productos', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   { moduleKey: 'dashboard.categorias', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   { moduleKey: 'dashboard.efectivo-otros-medios', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
-  // Estos 3 incluyen VENDEDOR porque el GET .../summary respectivo ya lo
-  // permite HOY a nivel @Roles() desde la Fase 2 — aunque el nav/middleware
-  // se lo ocultan (ver plan de Fase 3, "hallazgo importante"). Insertarlo
-  // en true es correcto para "no cambia nada al lanzar"; un SUPER_ADMIN
-  // puede apagarlo a propósito justo después desde el panel si nunca fue
-  // intencional que Vendedor lo viera.
-  { moduleKey: 'dashboard.trafico-tiendas', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
-  { moduleKey: 'dashboard.venta-mensual', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
-  { moduleKey: 'dashboard.ticket-promedio', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
+  // Solo Admin y Finanzas: son pantallas que el Vendedor nunca ve (ver
+  // MODULE_KEY_CEILING en module-keys.const.ts).
+  { moduleKey: 'dashboard.trafico-tiendas', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
+  { moduleKey: 'dashboard.venta-mensual', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
+  { moduleKey: 'dashboard.ticket-promedio', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
   { moduleKey: 'dashboard.ventas-mayoreo', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
   { moduleKey: 'dashboard.buscar-compradores', roles: [Role.SUPER_ADMIN, Role.FINANZAS] },
   // Cierre del mes no tiene endpoint propio (combina los summary de

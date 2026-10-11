@@ -35,7 +35,9 @@ export class SalesController {
     private readonly customerSearchService: CustomerSearchService,
   ) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  // Solo Admin y Finanzas (hereda el @Roles de la clase) y con la pantalla de
+  // tickets o el Resumen habilitados.
+  @RequiresModule('dashboard.ticket-detallado', 'dashboard.resumen')
   @Get('orders')
   @ApiOperation({
     summary: 'Órdenes por rango de fecha y tienda, paginado',
@@ -147,6 +149,7 @@ export class SalesController {
     return stores;
   }
 
+  @RequiresModule('dashboard.visitas', 'dashboard.venta-mensual')
   @Get('by-salesperson')
   @ApiOperation({
     summary: 'Visitas y venta por vendedor, contando facturas',
@@ -161,6 +164,7 @@ export class SalesController {
     return this.salespersonSalesService.findBySalesperson(query);
   }
 
+  @RequiresModule('dashboard.visitas', 'dashboard.venta-mensual')
   @Get('by-store')
   @ApiOperation({
     summary: 'Visitas y venta por tienda, contando facturas — la fuente de Visitas y Venta Mensual',
@@ -220,7 +224,14 @@ export class SalesController {
     return this.salesService.findPaymentMethodsSummary(query);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  // Diagnóstico: solo Admin y Finanzas y con alguna pantalla de ventas habilitada.
+  @RequiresModule(
+    'dashboard.resumen',
+    'dashboard.visitas',
+    'dashboard.trafico-diario',
+    'dashboard.venta-diaria',
+    'dashboard.ticket-detallado',
+  )
   @Get('reconciliation')
   @ApiOperation({
     summary: 'Diagnóstico: compara el conteo por día local de la tienda vs. por fecha de sesión',

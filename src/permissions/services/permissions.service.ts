@@ -45,6 +45,12 @@ export class PermissionsService {
   // bug o una fila faltante nunca degrada a un bloqueo sorpresa, solo a
   // "sin restricción nueva".
   async isEnabledForRole(role: Role, moduleKey: string): Promise<boolean> {
+    // Fuera del techo del rol nunca cuenta como habilitado, aunque no haya
+    // fila: en un endpoint compartido por varias pantallas (summary de
+    // metas) el rol no puede entrar por una pantalla que no le corresponde.
+    const ceiling = MODULE_KEY_CEILING[moduleKey as ModuleKey];
+    if (ceiling && !ceiling.includes(role)) return false;
+
     const rows = await this.getRows();
     const row = rows.find((r) => r.role === role && r.moduleKey === moduleKey);
     return row ? row.enabled : true;

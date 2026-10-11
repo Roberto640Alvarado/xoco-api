@@ -39,6 +39,11 @@ export function isModuleKey(value: string): value is ModuleKey {
   return (MODULE_KEYS as readonly string[]).includes(value);
 }
 
+// Tráfico de tiendas, Venta mensual y Ticket promedio son pantallas solo de
+// Admin y Finanzas (el menú y el middleware ya se las ocultan al Vendedor): su
+// techo no incluye VENDEDOR, así el panel Permisos no ofrece un interruptor
+// que no hace nada y, en el guard, esos módulos nunca cuentan a su favor.
+//
 // Techo ORIGINAL de @Roles() por módulo, tal como quedó fijado en código
 // en las Fases 1 y 2 — es la fuente única de verdad que
 // PermissionsService usa para rechazar (400) cualquier intento de
@@ -54,13 +59,13 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   'dashboard.resumen': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.visitas': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.trafico-diario': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
-  'dashboard.trafico-tiendas': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
+  'dashboard.trafico-tiendas': [Role.SUPER_ADMIN, Role.FINANZAS],
   'dashboard.venta-diaria': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
-  'dashboard.venta-mensual': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
+  'dashboard.venta-mensual': [Role.SUPER_ADMIN, Role.FINANZAS],
   'dashboard.efectivo-otros-medios': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.ventas-mayoreo': [Role.SUPER_ADMIN, Role.FINANZAS],
   'dashboard.buscar-compradores': [Role.SUPER_ADMIN, Role.FINANZAS],
-  'dashboard.ticket-promedio': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
+  'dashboard.ticket-promedio': [Role.SUPER_ADMIN, Role.FINANZAS],
   'dashboard.ticket-detallado': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.productos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.categorias': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
