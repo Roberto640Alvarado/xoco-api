@@ -50,22 +50,37 @@ export interface TopProductByWeightDoc {
   totalRevenue: number;
 }
 
-// Un período (mes en curso o mes anterior) dentro de la comparación
-// mensual por producto. `dateFrom`/`dateTo` son el rango local de tienda
-// que efectivamente se agregó, para que el frontend pueda mostrarlo
-// (ej. "1-12 sep" vs. "1-30 ago") sin tener que recalcularlo.
-export interface ProductMonthPeriodDoc {
-  dateFrom: string;
+// Comparación de productos entre dos períodos libres (ver
+// SalesService.findProductComparison). "A" es el período principal y "B"
+// contra el que se compara. Los totales de cada período cubren TODOS los
+// productos por pieza vendidos en él (no solo los que el frontend decida
+// graficar), para que los KPIs de arriba no dependan del top elegido.
+export interface ProductComparisonPeriodDoc {
+  dateFrom: string; // YYYY-MM-DD, día local de tienda
   dateTo: string;
+  quantity: number;
+  revenue: number;
+  /** Productos distintos con al menos una venta en el período. */
+  productCount: number;
+}
+
+export interface ProductComparisonValuesDoc {
   quantity: number;
   revenue: number;
 }
 
-export interface ProductMonthlyComparisonDoc {
+export interface ProductComparisonItemDoc {
   productId: number;
   productName: string;
-  currentMonth: ProductMonthPeriodDoc;
-  previousMonth: ProductMonthPeriodDoc;
+  periodA: ProductComparisonValuesDoc;
+  periodB: ProductComparisonValuesDoc;
+}
+
+export interface ProductComparisonDoc {
+  periodA: ProductComparisonPeriodDoc;
+  periodB: ProductComparisonPeriodDoc;
+  /** Todos los productos vendidos en A o en B, por unidades de A (mayor primero). */
+  items: ProductComparisonItemDoc[];
 }
 
 // Un producto dentro del top de su categoría — ver findTopProductsByCategory.

@@ -1,24 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { OdooMany2One, OdooSearchReadOptions } from '../../odoo/types/odoo-common.types.js';
 import { OdooPosOrder, OdooPosOrderLine } from '../../odoo/types/odoo-entities.types.js';
 import { OdooPosOrderState } from '../../odoo/enums/odoo-pos-order.enum.js';
 import {
   enumerateDates,
-  endOfMonth,
   shiftDate,
-  shiftMonthStart,
-  startOfMonth,
-  storeDayRangeToUtc,
   toStoreDate,
-  todayStoreDate,
 } from '../../common/utils/store-date.util.js';
+import { buildPosOrdersDomain } from '../builders/pos-order-domain.builder.js';
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { roundMoney } from '../../common/utils/money.util.js';
 import { isWeightUom, weightKgFactor } from '../../common/utils/product-uom.util.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
-import { FindProductMonthlyComparisonQueryDto } from '../dto/find-product-monthly-comparison-query.dto.js';
+import { FindProductComparisonQueryDto } from '../dto/find-product-comparison-query.dto.js';
 import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-category-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
@@ -29,7 +25,9 @@ import {
   PaginatedOrdersDoc,
   PaymentMethodBucketDoc,
   PaymentMethodsSummaryDoc,
-  ProductMonthlyComparisonDoc,
+  ProductComparisonDoc,
+  ProductComparisonItemDoc,
+  ProductComparisonPeriodDoc,
   ReconciliationOrderDoc,
   ReconciliationStoreDoc,
   RefDoc,
@@ -47,6 +45,17 @@ import {
 const RECONCILIATION_MARGIN_DAYS = 2;
 
 const UNKNOWN_REF: RefDoc = { id: -1, name: 'Desconocido' };
+
+// Tope de días por período en /sales/product-comparison: un año completo
+// (bisiesto incluido). Cada período trae todas sus líneas de Odoo, así que
+// sin tope un rango de varios años dispararía cientos de páginas.
+const MAX_COMPARISON_PERIOD_DAYS = 366;
+
+interface ProductPeriodTotals {
+  productName: string;
+  quantity: number;
+  revenue: number;
+}
 
 // Todo producto en Odoo debería tener categ_id (campo obligatorio), pero
 // se deja un fallback igual que UNKNOWN_REF por si alguno queda sin
@@ -74,32 +83,15 @@ export class SalesService {
     return fetchAllOdooPages(fetchPage, domain, contextLabel, this.logger);
   }
 
-  // Domain de pos.order para un rango de DÍAS LOCALES de la tienda.
-  //
-  // Una orden pertenece al día en que se cobró en hora local (igual que en
-  // los reportes propios de Odoo), no al día en que abrió la sesión POS:
-  // las tiendas no siempre cierran caja cada noche, y una sesión que se
-  // queda abierta 40 horas dejaría días enteros en cero. Como Odoo guarda
-  // date_order en UTC, el rango local se traduce a la ventana UTC que lo
-  // cubre (ver store-date.util.ts).
+  // Ver buildPosOrdersDomain() — vive en builders/ porque también lo usa
+  // PosTicketsService (Tickets → Órdenes).
   private buildOrdersDomain(
     dateFrom: string,
     dateTo: string,
     posConfigId?: number,
     options: { excludeCancelled?: boolean } = {},
   ): unknown[] {
-    const { utcFrom, utcTo } = storeDayRangeToUtc(dateFrom, dateTo);
-    const domain: unknown[] = [
-      ['date_order', '>=', utcFrom],
-      ['date_order', '<=', utcTo],
-    ];
-    if (posConfigId) {
-      domain.push(['config_id', '=', posConfigId]);
-    }
-    if (options.excludeCancelled) {
-      domain.push(['state', '!=', OdooPosOrderState.CANCEL]);
-    }
-    return domain;
+    return buildPosOrdersDomain(dateFrom, dateTo, posConfigId, options);
   }
 
   private toSalesOrderDoc(order: OdooPosOrder): SalesOrderDoc {
@@ -149,7 +141,7 @@ export class SalesService {
 
   // Trae órdenes + líneas de un rango en un solo viaje reutilizable — lo
   // usan findTopProducts, findTopProductsByWeight y
-  // findProductMonthlyComparison. Si no hay órdenes, ni siquiera consulta
+  // findProductComparison. Si no hay órdenes, ni siquiera consulta
   // líneas (ver el test que lo cubre).
   private async fetchOrdersAndLines(
     dateFrom: string,
@@ -373,95 +365,100 @@ export class SalesService {
       }));
   }
 
-  // Top N productos (por unidades del mes en curso) con su comparación
-  // contra el mes anterior COMPLETO — para el gráfico de "mes en curso
-  // arriba / mes anterior abajo" del dashboard de productos. Un solo viaje
-  // a Odoo que cubre ambos meses; cada orden se clasifica en su período por
-  // su día LOCAL de tienda (igual que el resto de /sales), y las líneas a
-  // granel se excluyen igual que en findTopProducts.
-  async findProductMonthlyComparison(
-    query: FindProductMonthlyComparisonQueryDto,
-  ): Promise<ProductMonthlyComparisonDoc[]> {
-    const today = query.referenceDate ?? todayStoreDate();
-    const currentMonthFrom = startOfMonth(today);
-    const currentMonthTo = today;
-    const previousMonthFrom = shiftMonthStart(currentMonthFrom, -1);
-    const previousMonthTo = endOfMonth(previousMonthFrom);
-
-    const { orders, lines } = await this.fetchOrdersAndLines(
-      previousMonthFrom,
-      currentMonthTo,
-      query.posConfigId,
-      'findProductMonthlyComparison',
-    );
-    if (orders.length === 0) {
-      return [];
+  // Valida un período de /sales/product-comparison: inicio <= fin y no más
+  // de MAX_COMPARISON_PERIOD_DAYS días. Las fechas ya llegan con formato
+  // válido (IsDateString en el DTO).
+  private assertComparisonPeriod(label: 'A' | 'B', dateFrom: string, dateTo: string): void {
+    if (dateFrom > dateTo) {
+      throw new BadRequestException(`En el período ${label}, la fecha inicial no puede ser posterior a la final.`);
     }
-
-    type Period = 'current' | 'previous';
-    const periodByOrderId = new Map<number, Period>();
-    for (const order of orders) {
-      const storeDate = toStoreDate(order.date_order);
-      if (storeDate >= currentMonthFrom && storeDate <= currentMonthTo) {
-        periodByOrderId.set(order.id, 'current');
-      } else if (storeDate >= previousMonthFrom && storeDate <= previousMonthTo) {
-        periodByOrderId.set(order.id, 'previous');
-      }
-      // Fuera de ambos rangos no debería pasar: el domain ya pidió
-      // exactamente [previousMonthFrom, currentMonthTo].
+    if (enumerateDates(dateFrom, dateTo).length > MAX_COMPARISON_PERIOD_DAYS) {
+      throw new BadRequestException(
+        `El período ${label} no puede ser mayor a ${MAX_COMPARISON_PERIOD_DAYS} días.`,
+      );
     }
+  }
 
-    interface ProductTotals {
-      productName: string;
-      quantity: number;
-      revenue: number;
-    }
-    const currentByProduct = new Map<number, ProductTotals>();
-    const previousByProduct = new Map<number, ProductTotals>();
-
+  // Unidades e ingreso por producto POR PIEZA de un período — las líneas a
+  // granel se excluyen igual que en findTopProducts (su qty no está en
+  // piezas y no es comparable).
+  private async sumUnitProducts(
+    dateFrom: string,
+    dateTo: string,
+    posConfigId: number | undefined,
+    contextLabel: string,
+  ): Promise<Map<number, ProductPeriodTotals>> {
+    const { lines } = await this.fetchOrdersAndLines(dateFrom, dateTo, posConfigId, contextLabel);
+    const totals = new Map<number, ProductPeriodTotals>();
     for (const line of lines) {
-      if (!line.product_id || !line.order_id) continue;
-      if (isWeightUom(line.product_uom_id)) continue; // ver findTopProducts
-
-      const period = periodByOrderId.get(line.order_id[0]);
-      if (!period) continue;
-
-      const bucket = period === 'current' ? currentByProduct : previousByProduct;
+      if (!line.product_id) continue;
+      if (isWeightUom(line.product_uom_id)) continue;
       const [productId, productName] = line.product_id;
-      const existing = bucket.get(productId);
+      const existing = totals.get(productId);
       if (existing) {
         existing.quantity += line.qty;
         existing.revenue += line.price_subtotal_incl;
       } else {
-        bucket.set(productId, { productName, quantity: line.qty, revenue: line.price_subtotal_incl });
+        totals.set(productId, { productName, quantity: line.qty, revenue: line.price_subtotal_incl });
       }
     }
+    return totals;
+  }
 
-    const productIds = new Set([...currentByProduct.keys(), ...previousByProduct.keys()]);
-    const rows: ProductMonthlyComparisonDoc[] = [...productIds].map((productId) => {
-      const current = currentByProduct.get(productId);
-      const previous = previousByProduct.get(productId);
+  private toComparisonPeriod(
+    dateFrom: string,
+    dateTo: string,
+    totals: Map<number, ProductPeriodTotals>,
+  ): ProductComparisonPeriodDoc {
+    let quantity = 0;
+    let revenue = 0;
+    for (const product of totals.values()) {
+      quantity += product.quantity;
+      revenue += product.revenue;
+    }
+    return { dateFrom, dateTo, quantity, revenue: roundMoney(revenue), productCount: totals.size };
+  }
+
+  // Compara, producto por producto, dos períodos LIBRES (A = principal,
+  // B = contra el que se compara): mes en curso vs. mes anterior, dos
+  // meses cualquiera o dos rangos personalizados. Cada período se pide a
+  // Odoo por separado (en paralelo) porque pueden estar lejos entre sí o
+  // incluso traslaparse. Devuelve TODOS los productos vendidos en
+  // cualquiera de los dos — el frontend decide cuántos graficar y cómo
+  // ordenarlos, sin volver a pedir datos.
+  async findProductComparison(query: FindProductComparisonQueryDto): Promise<ProductComparisonDoc> {
+    this.assertComparisonPeriod('A', query.periodAFrom, query.periodATo);
+    this.assertComparisonPeriod('B', query.periodBFrom, query.periodBTo);
+
+    const [totalsA, totalsB] = await Promise.all([
+      this.sumUnitProducts(query.periodAFrom, query.periodATo, query.posConfigId, 'findProductComparison A'),
+      this.sumUnitProducts(query.periodBFrom, query.periodBTo, query.posConfigId, 'findProductComparison B'),
+    ]);
+
+    const productIds = new Set([...totalsA.keys(), ...totalsB.keys()]);
+    const items: ProductComparisonItemDoc[] = [...productIds].map((productId) => {
+      const a = totalsA.get(productId);
+      const b = totalsB.get(productId);
       return {
         productId,
-        productName: current?.productName ?? previous?.productName ?? 'Desconocido',
-        currentMonth: {
-          dateFrom: currentMonthFrom,
-          dateTo: currentMonthTo,
-          quantity: current?.quantity ?? 0,
-          revenue: current?.revenue ?? 0,
-        },
-        previousMonth: {
-          dateFrom: previousMonthFrom,
-          dateTo: previousMonthTo,
-          quantity: previous?.quantity ?? 0,
-          revenue: previous?.revenue ?? 0,
-        },
+        productName: a?.productName ?? b?.productName ?? UNKNOWN_REF.name,
+        periodA: { quantity: a?.quantity ?? 0, revenue: roundMoney(a?.revenue ?? 0) },
+        periodB: { quantity: b?.quantity ?? 0, revenue: roundMoney(b?.revenue ?? 0) },
       };
     });
 
-    return rows
-      .sort((a, b) => b.currentMonth.quantity - a.currentMonth.quantity)
-      .slice(0, query.limit);
+    items.sort(
+      (x, y) =>
+        y.periodA.quantity - x.periodA.quantity ||
+        y.periodB.quantity - x.periodB.quantity ||
+        x.productName.localeCompare(y.productName, 'es'),
+    );
+
+    return {
+      periodA: this.toComparisonPeriod(query.periodAFrom, query.periodATo, totalsA),
+      periodB: this.toComparisonPeriod(query.periodBFrom, query.periodBTo, totalsB),
+      items,
+    };
   }
 
   // Ventas agregadas por día local de la tienda — para la gráfica de

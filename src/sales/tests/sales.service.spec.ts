@@ -405,54 +405,94 @@ describe('SalesService', () => {
     });
   });
 
-  describe('findProductMonthlyComparison', () => {
-    it('separa cada orden en mes en curso / mes anterior por su día local, y excluye a granel', async () => {
-      odoo = createOdooServiceMock({
-        orders: [
-          monthlyOrder(1, '2026-09-07 18:00:00'), // día local 2026-09-07 -> mes en curso
-          monthlyOrder(2, '2026-08-15 18:00:00'), // día local 2026-08-15 -> mes anterior
-          // Fuera de la ventana pedida (previousMonthFrom..currentMonthTo);
-          // el mock no filtra por domain, así que esto prueba que el
-          // bucketing por fecha (no el domain) es lo que lo excluye.
-          monthlyOrder(3, '2026-07-01 18:00:00'),
+  describe('findProductComparison', () => {
+    // El mock base no interpreta el domain; acá sí hace falta que cada
+    // período reciba solo sus órdenes (se piden por separado), así que se
+    // filtra por la ventana UTC de date_order y por order_id de las líneas.
+    function comparisonService(
+      orders: import('../../odoo/types/odoo-entities.types.js').OdooPosOrder[],
+      lines: ReturnType<typeof lineOf>[],
+    ): SalesService {
+      odoo = createOdooServiceMock();
+      odoo.findPosOrders.mockImplementation(async ({ domain }: { domain: unknown[][] }) => {
+        const from = domain.find((c) => c[0] === 'date_order' && c[1] === '>=')![2] as string;
+        const to = domain.find((c) => c[0] === 'date_order' && c[1] === '<=')![2] as string;
+        return orders.filter((order) => order.date_order >= from && order.date_order <= to);
+      });
+      odoo.findPosOrderLines.mockImplementation(async ({ domain }: { domain: unknown[][] }) => {
+        const ids = domain.find((c) => c[0] === 'order_id')![2] as number[];
+        return lines.filter((line) => ids.includes(line.order_id[0]));
+      });
+      return new SalesService(odoo.service);
+    }
+
+    it('suma cada período por separado, devuelve sus totales y excluye a granel', async () => {
+      const service = comparisonService(
+        [
+          monthlyOrder(1, '2026-10-07 18:00:00'), // período A (oct)
+          monthlyOrder(2, '2026-09-15 18:00:00'), // período B (sep)
+          monthlyOrder(3, '2026-07-01 18:00:00'), // fuera de ambos
         ],
-        lines: [
+        [
           lineOf(1, 1, [10, 'Trufa Leche'], 4, 3.54),
           lineOf(2, 2, [10, 'Trufa Leche'], 6, 5.31),
           lineOf(3, 2, [11, 'Americano'], 1, 1.99),
-          lineOf(4, 3, [10, 'Trufa Leche'], 100, 88.5), // julio: no debe sumar a ningún mes
+          lineOf(4, 3, [10, 'Trufa Leche'], 100, 88.5), // julio: no suma
           lineOf(5, 1, [12, 'Crocks Chocolate'], 500, 10, GRAMOS), // a granel: excluido
         ],
-      });
-      const service = new SalesService(odoo.service);
+      );
 
-      const rows = await service.findProductMonthlyComparison({
+      const result = await service.findProductComparison({
+        periodAFrom: '2026-10-01',
+        periodATo: '2026-10-20',
+        periodBFrom: '2026-09-01',
+        periodBTo: '2026-09-30',
         posConfigId: RAMBLAS_ID,
-        limit: 10,
-        referenceDate: '2026-09-12',
       });
 
-      expect(rows.map((row) => row.productName)).toEqual(['Trufa Leche', 'Americano']);
-
-      const trufa = rows.find((row) => row.productId === 10)!;
-      expect(trufa.currentMonth).toMatchObject({
-        dateFrom: '2026-09-01',
-        dateTo: '2026-09-12',
+      expect(result.periodA).toEqual({
+        dateFrom: '2026-10-01',
+        dateTo: '2026-10-20',
         quantity: 4,
         revenue: 3.54,
+        productCount: 1,
       });
-      expect(trufa.previousMonth).toMatchObject({
-        dateFrom: '2026-08-01',
-        dateTo: '2026-08-31',
-        quantity: 6,
-        revenue: 5.31,
+      expect(result.periodB).toMatchObject({ quantity: 7, revenue: 7.3, productCount: 2 });
+
+      // Ordenados por unidades de A; Americano solo vendió en B.
+      expect(result.items.map((item) => item.productName)).toEqual(['Trufa Leche', 'Americano']);
+      expect(result.items[0]).toMatchObject({
+        periodA: { quantity: 4, revenue: 3.54 },
+        periodB: { quantity: 6, revenue: 5.31 },
       });
+      expect(result.items[1]).toMatchObject({ periodA: { quantity: 0, revenue: 0 } });
+      expect(result.items.some((item) => item.productId === 12)).toBe(false);
+      expect(domainOfCall(odoo.findPosOrders)).toContainEqual(['config_id', '=', RAMBLAS_ID]);
+    });
 
-      const americano = rows.find((row) => row.productId === 11)!;
-      expect(americano.currentMonth).toMatchObject({ quantity: 0, revenue: 0 });
-      expect(americano.previousMonth).toMatchObject({ quantity: 1, revenue: 1.99 });
+    it('rechaza un período con la fecha inicial después de la final', async () => {
+      const service = comparisonService([], []);
+      await expect(
+        service.findProductComparison({
+          periodAFrom: '2026-10-20',
+          periodATo: '2026-10-01',
+          periodBFrom: '2026-09-01',
+          periodBTo: '2026-09-30',
+        }),
+      ).rejects.toThrow('En el período A, la fecha inicial no puede ser posterior a la final.');
+      expect(odoo.findPosOrders).not.toHaveBeenCalled();
+    });
 
-      expect(rows.some((row) => row.productId === 12)).toBe(false);
+    it('rechaza un período de más de 366 días', async () => {
+      const service = comparisonService([], []);
+      await expect(
+        service.findProductComparison({
+          periodAFrom: '2026-10-01',
+          periodATo: '2026-10-20',
+          periodBFrom: '2024-01-01',
+          periodBTo: '2025-12-31',
+        }),
+      ).rejects.toThrow('El período B no puede ser mayor a 366 días.');
     });
   });
 

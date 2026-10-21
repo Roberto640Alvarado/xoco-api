@@ -218,6 +218,7 @@ export class OdooRepository {
           'company_id',
           'create_date',
           'write_date',
+          'pos_reference',
         ],
         limit: 100,
         ...kwargs,

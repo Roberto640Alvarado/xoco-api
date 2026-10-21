@@ -34,8 +34,10 @@ const MODULE_ROLE_CEILING = [
   { moduleKey: 'dashboard.trafico-diario', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   { moduleKey: 'dashboard.venta-diaria', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   { moduleKey: 'dashboard.ticket-detallado', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
+  { moduleKey: 'dashboard.ordenes', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   { moduleKey: 'dashboard.productos', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   { moduleKey: 'dashboard.categorias', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
+  { moduleKey: 'dashboard.comparacion-productos', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   { moduleKey: 'dashboard.efectivo-otros-medios', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
   // Solo Admin y Finanzas: son pantallas que el Vendedor nunca ve (ver
   // MODULE_KEY_CEILING en module-keys.const.ts).

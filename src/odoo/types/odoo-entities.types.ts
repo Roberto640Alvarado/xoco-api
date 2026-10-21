@@ -98,6 +98,9 @@ export interface OdooPosOrder {
   company_id: OdooMany2One;
   create_date: string;
   write_date: string;
+  // Número del recibo impreso ("Orden 00012-003-0004"). Opcional porque
+  // los mocks de tests viejos no lo traen.
+  pos_reference?: string | false;
 }
 
 export interface OdooPosOrderLine {
@@ -146,6 +149,8 @@ export interface OdooPosOrderGroup {
   __count: number;
   user_id?: OdooMany2One;
   config_id?: OdooMany2One;
+  // Suma de amount_total del grupo, cuando se pide en `fields`.
+  amount_total?: number;
 }
 
 // Fila agregada de `account.move` tal como la devuelve `read_group`.
@@ -180,5 +185,7 @@ export interface OdooPosPaymentMethod {
 export interface OdooPosPaymentGroup {
   __count: number;
   payment_method_id?: OdooMany2One;
+  // Presente cuando se agrupa también por orden (ver PosTicketsService).
+  pos_order_id?: OdooMany2One;
   amount?: number;
 }

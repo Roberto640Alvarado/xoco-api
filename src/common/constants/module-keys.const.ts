@@ -1,6 +1,6 @@
 import { Role } from '../../generated/prisma/index.js';
 
-// Catálogo de los 14 módulos NO administrativos del dashboard, cuyo
+// Catálogo de los módulos NO administrativos del dashboard, cuyo
 // acceso por rol se puede configurar desde el panel "Permisos" (Fase 3
 // de RBAC). Administración (/dashboard/admin/*) NUNCA tiene moduleKey —
 // se mantiene fuera de este catálogo por completo (ver
@@ -26,8 +26,10 @@ export const MODULE_KEYS = [
   'dashboard.buscar-compradores',
   'dashboard.ticket-promedio',
   'dashboard.ticket-detallado',
+  'dashboard.ordenes',
   'dashboard.productos',
   'dashboard.categorias',
+  'dashboard.comparacion-productos',
   'dashboard.cierre-mes',
   'dashboard.inventario',
   'dashboard.inventario-movimientos',
@@ -67,8 +69,14 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   'dashboard.buscar-compradores': [Role.SUPER_ADMIN, Role.FINANZAS],
   'dashboard.ticket-promedio': [Role.SUPER_ADMIN, Role.FINANZAS],
   'dashboard.ticket-detallado': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
+  // Tickets → Órdenes: cada orden con su detalle. El Vendedor solo las de
+  // su tienda (PosTicketsController).
+  'dashboard.ordenes': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.productos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.categorias': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
+  // Comparación de productos entre dos períodos: el Vendedor la ve solo de
+  // su tienda (scopedPosConfigId en el controller).
+  'dashboard.comparacion-productos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   'dashboard.cierre-mes': [Role.SUPER_ADMIN, Role.FINANZAS],
   // Inventario (Conteo y Registro): Vendedor SOLO LEE el de su propia
   // tienda (assertOwnStoreOrThrow); la captura del conteo (PUT) sigue

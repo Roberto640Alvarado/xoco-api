@@ -1,5 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Role } from '../../generated/prisma/index.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { User } from '../../common/decorators/user.decorator.js';
@@ -14,7 +14,7 @@ import { CustomerSearchService } from '../services/customer-search.service.js';
 import { FindCustomerSearchQueryDto } from '../dto/find-customer-search-query.dto.js';
 import { FindOrdersQueryDto } from '../dto/find-orders-query.dto.js';
 import { FindTopProductsQueryDto } from '../dto/find-top-products-query.dto.js';
-import { FindProductMonthlyComparisonQueryDto } from '../dto/find-product-monthly-comparison-query.dto.js';
+import { FindProductComparisonQueryDto } from '../dto/find-product-comparison-query.dto.js';
 import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-category-query.dto.js';
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
@@ -80,20 +80,26 @@ export class SalesController {
     return this.salesService.findTopProductsByWeight(query);
   }
 
+  // Pantalla propia (Productos → Comparación), con su propio moduleKey.
+  // El Vendedor solo compara su tienda: scopedPosConfigId ignora el
+  // posConfigId que mande y usa siempre el suyo.
   @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
-  @RequiresModule('dashboard.productos')
-  @Get('product-monthly-comparison')
+  @RequiresModule('dashboard.comparacion-productos')
+  @Get('product-comparison')
   @ApiOperation({
-    summary: 'Compara, por producto, unidades e ingreso del mes en curso contra el mes anterior completo',
+    summary: 'Compara, producto por producto, unidades e ingreso de dos períodos (A vs. B)',
     description:
-      'Top N de productos por unidades vendidas en lo que va del mes en curso (día 1 hasta hoy, hora local de la ' +
-      'tienda), con sus unidades e ingreso del mes anterior COMPLETO al lado — pensado para graficar ambos meses ' +
-      'juntos por producto. Mismo criterio de "producto" que /sales/top-products (excluye los que se venden a ' +
-      'granel — ver /sales/top-products-by-weight).',
+      'Dos rangos libres de días locales de tienda (ej. mes en curso vs. mes anterior, dos meses cualquiera o ' +
+      'dos rangos personalizados), de hasta 366 días cada uno. Devuelve los totales de cada período y todos los ' +
+      'productos vendidos en cualquiera de los dos, ordenados por unidades del período A. Mismo criterio de ' +
+      '"producto" que /sales/top-products: excluye órdenes canceladas y productos a granel.',
   })
-  findProductMonthlyComparison(@Query() query: FindProductMonthlyComparisonQueryDto, @User() user: AuthenticatedUser) {
+  @ApiResponse({ status: 200, description: 'Totales de cada período y productos comparados.' })
+  @ApiResponse({ status: 400, description: 'Un período tiene la fecha inicial después de la final o pasa de 366 días.' })
+  @ApiResponse({ status: 403, description: 'El rol no tiene acceso a Comparación de productos.' })
+  findProductComparison(@Query() query: FindProductComparisonQueryDto, @User() user: AuthenticatedUser) {
     query.posConfigId = scopedPosConfigId(user, query.posConfigId);
-    return this.salesService.findProductMonthlyComparison(query);
+    return this.salesService.findProductComparison(query);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)

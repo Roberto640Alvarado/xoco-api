@@ -25,6 +25,14 @@ export function toStoreDate(odooDateTime: string): string {
     .slice(0, 10);
 }
 
+// "2026-09-08 01:04:31" (UTC) -> "19:04" (hora local de la tienda, 24 h).
+export function toStoreTime(odooDateTime: string): string {
+  const utcMs = Date.parse(`${odooDateTime.replace(' ', 'T')}Z`);
+  return new Date(utcMs + STORE_UTC_OFFSET_HOURS * MS_PER_HOUR)
+    .toISOString()
+    .slice(11, 16);
+}
+
 // Rango de días locales -> la ventana UTC que hay que pedirle a Odoo para
 // cubrirlos completos. Con UTC-6, el 2026-09-07 local va de
 // "2026-09-07 06:00:00" a "2026-09-08 05:59:59" en UTC.
@@ -79,8 +87,7 @@ export function enumerateDates(dateFrom: string, dateTo: string): string[] {
 
 // "Hoy" en el día local de la tienda — mismo offset fijo que el resto de
 // este archivo (ver STORE_UTC_OFFSET_HOURS). Lo usan los reportes que
-// necesitan saber en qué mes/día local estamos parados ahora mismo (ej.
-// la comparación "mes en curso vs. mes anterior" de /sales/product-monthly-comparison).
+// necesitan saber en qué mes/día local estamos parados ahora mismo.
 export function todayStoreDate(): string {
   return new Date(Date.now() + STORE_UTC_OFFSET_HOURS * MS_PER_HOUR)
     .toISOString()
