@@ -89,6 +89,25 @@ describe('PosTicketsService', () => {
       expect(odoo.findPosOrders.mock.calls[0][0]).toMatchObject({ limit: 20, offset: 0, order: 'date_order desc, id desc' });
     });
 
+    it('separa la propina de cada orden sin quitarla de los conteos ni montos', async () => {
+      const odoo = createOdooServiceMock({
+        orders: [orderOf(1, '2026-10-08 01:04:31'), orderOf(2, '2026-10-08 02:00:00')],
+        lines: [
+          lineOf(10, 1, [100, 'Trufa Leche'], 2, 3.5),
+          lineOf(11, 1, [900, 'PROPINA'], 1, 1.13),
+          lineOf(12, 2, [101, 'Tipo Mocha'], 1, 2),
+        ],
+      });
+      const result = await new PosTicketsService(odoo.service).findTickets(BASE_QUERY);
+
+      expect(result.items[0]).toMatchObject({
+        lineCount: 2,
+        unitCount: 3,
+        tip: { lineCount: 1, unitCount: 1, amountUntaxed: 1, amountTax: 0.13, amountTotal: 1.13 },
+      });
+      expect(result.items[1].tip).toBeNull();
+    });
+
     it('no consulta líneas ni pagos si la página viene vacía', async () => {
       const odoo = createOdooServiceMock();
       const service = new PosTicketsService(odoo.service);

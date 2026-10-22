@@ -5,6 +5,7 @@ import { OdooPosOrder, OdooPosOrderLine, OdooPosPaymentGroup } from '../../odoo/
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { roundMoney } from '../../common/utils/money.util.js';
 import { isWeightUom, weightKgFactor } from '../../common/utils/product-uom.util.js';
+import { isTipProductName } from '../../common/utils/tip-product.util.js';
 import { toStoreDate, toStoreTime } from '../../common/utils/store-date.util.js';
 import { buildPosOrdersDomain } from '../builders/pos-order-domain.builder.js';
 import { FindPosTicketsQueryDto } from '../dto/find-pos-tickets-query.dto.js';
@@ -16,6 +17,7 @@ import {
   PosTicketLineDoc,
   PosTicketPaymentDoc,
   PosTicketSummaryDoc,
+  PosTicketTipDoc,
   PosTicketsTotalsDoc,
 } from '../doc/pos-tickets.doc.js';
 
@@ -32,6 +34,31 @@ const SORT_ORDER: Record<PosTicketSort, string> = {
 
 function toRef(value: OdooMany2One): RefDoc | null {
   return value ? { id: value[0], name: value[1] } : null;
+}
+
+function lineProductName(line: OdooPosOrderLine): string {
+  return line.full_product_name || (line.product_id ? line.product_id[1] : 'Producto sin nombre');
+}
+
+function countUnits(lines: OdooPosOrderLine[]): number {
+  return lines.reduce((sum, line) => (isWeightUom(line.product_uom_id) ? sum : sum + line.qty), 0);
+}
+
+// Parte de la orden que es propina (ver tip-product.util.ts), para que un
+// reporte pueda descontarla sin volver a pedir las líneas. null si la
+// orden no lleva propina.
+function toTip(lines: OdooPosOrderLine[]): PosTicketTipDoc | null {
+  const tipLines = lines.filter((line) => isTipProductName(lineProductName(line)));
+  if (tipLines.length === 0) return null;
+  const amountUntaxed = tipLines.reduce((sum, line) => sum + line.price_subtotal, 0);
+  const amountTotal = tipLines.reduce((sum, line) => sum + line.price_subtotal_incl, 0);
+  return {
+    lineCount: tipLines.length,
+    unitCount: countUnits(tipLines),
+    amountUntaxed: roundMoney(amountUntaxed),
+    amountTax: roundMoney(amountTotal - amountUntaxed),
+    amountTotal: roundMoney(amountTotal),
+  };
 }
 
 // Tickets → Órdenes: cada orden de caja (pos.order) con su información
@@ -73,7 +100,6 @@ export class PosTicketsService {
   }
 
   private toSummary(order: OdooPosOrder, lines: OdooPosOrderLine[], paymentMethods: string[]): PosTicketSummaryDoc {
-    const unitCount = lines.reduce((sum, line) => (isWeightUom(line.product_uom_id) ? sum : sum + line.qty), 0);
     return {
       id: order.id,
       name: order.name,
@@ -86,13 +112,14 @@ export class PosTicketsService {
       cashier: toRef(order.user_id),
       customer: toRef(order.partner_id),
       lineCount: lines.length,
-      unitCount,
+      unitCount: countUnits(lines),
       amountUntaxed: roundMoney(order.amount_total - order.amount_tax),
       amountTax: roundMoney(order.amount_tax),
       amountTotal: roundMoney(order.amount_total),
       amountPaid: roundMoney(order.amount_paid),
       amountReturn: roundMoney(order.amount_return),
       paymentMethods,
+      tip: toTip(lines),
     };
   }
 
@@ -101,7 +128,7 @@ export class PosTicketsService {
     return {
       id: line.id,
       productId: line.product_id ? line.product_id[0] : null,
-      productName: line.full_product_name || (line.product_id ? line.product_id[1] : 'Producto sin nombre'),
+      productName: lineProductName(line),
       quantity: line.qty,
       uomName: line.product_uom_id ? line.product_uom_id[1] : null,
       isWeight: kgFactor !== null,

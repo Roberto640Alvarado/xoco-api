@@ -28,6 +28,20 @@ export interface PosTicketSummaryDoc {
   amountReturn: number;
   /** Nombres de los métodos de pago usados, sin repetir. */
   paymentMethods: string[];
+  /**
+   * Parte de la orden que es propina (ya incluida en los conteos y montos
+   * de arriba), para reportes que no deben contarla como venta. null si la
+   * orden no lleva propina.
+   */
+  tip: PosTicketTipDoc | null;
+}
+
+export interface PosTicketTipDoc {
+  lineCount: number;
+  unitCount: number;
+  amountUntaxed: number;
+  amountTax: number;
+  amountTotal: number;
 }
 
 export interface PosTicketsTotalsDoc {
