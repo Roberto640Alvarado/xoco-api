@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { isWeightUom } from '../../common/utils/product-uom.util.js';
+import { productCategoryName } from '../../common/utils/product-category.util.js';
 import { toOdooDateTime } from '../../common/utils/store-date.util.js';
 import { OdooPosOrderState } from '../../odoo/enums/odoo-pos-order.enum.js';
 import { InventoryRepository } from '../repositories/inventory.repository.js';
@@ -89,9 +90,8 @@ export class InventoryService {
   // InventoryMovementsRepository.findConfirmedSince) — null si el
   // producto nunca se ha contado. ENTRADA es el único tipo que suma en
   // vez de restar (ver movedSinceThisCount abajo); usa
-  // `receivedQuantity` (lo que el Vendedor confirmó recibir) cuando
-  // existe, y si no (una ENTRADA que Admin/Finanzas registró directo,
-  // sin pasar por el paso de recepción) cae en `quantity`.
+  // `receivedQuantity` (lo que la tienda confirmó recibir de una
+  // solicitud) cuando existe, y si no cae en `quantity`.
   private estimateQuantity(
     saved: StoreInventoryItem | undefined,
     soldLinesByProduct: Map<number, SoldLine[]>,
@@ -161,6 +161,7 @@ export class InventoryService {
         return {
           productId: product.id,
           productName: product.display_name,
+          categoryName: productCategoryName(product.categ_id),
           unit: isWeightUom(product.uom_id) ? 'kg' : 'unidad',
           quantity: saved ? saved.quantity : null,
           estimatedQuantity: this.estimateQuantity(saved, soldLinesByProduct, movementsByProduct),

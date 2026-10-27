@@ -18,6 +18,17 @@ export interface CreateMovementData {
   registeredByRole: Role;
 }
 
+export interface CreateConfirmedEntryData {
+  posConfigId: number;
+  productId: number;
+  quantity: number;
+  note: string;
+  occurredAt: Date;
+  stockRequestId: string;
+  registeredByEmail: string;
+  registeredByRole: Role;
+}
+
 // Único acceso a datos permitido a la colección store_inventory_movements
 // — el resto de la app pasa siempre por InventoryMovementsService, nunca
 // por Prisma directo (ver CLAUDE.md, Repository Pattern).
@@ -62,49 +73,35 @@ export class InventoryMovementsRepository {
     });
   }
 
-  // Movimientos abiertos de TODAS las tiendas, más recientes primero — la
-  // bandeja de Admin/Finanzas. `entrada` separa las solicitudes de stock
-  // (ENTRADA) de merma/regalía/degustación.
-  findOpen(entrada: boolean, statuses: InventoryMovementStatus[]): Promise<StoreInventoryMovement[]> {
+  // Movimientos abiertos (merma/regalía/degustación) de TODAS las tiendas,
+  // más recientes primero — la bandeja de Admin/Finanzas.
+  findOpen(statuses: InventoryMovementStatus[]): Promise<StoreInventoryMovement[]> {
     return this.prisma.storeInventoryMovement.findMany({
-      where: { status: { in: statuses }, type: this.entradaFilter(entrada) },
+      where: { status: { in: statuses }, type: { not: InventoryMovementType.ENTRADA } },
       orderBy: { occurredAt: 'desc' },
     });
   }
 
-  // Cuántos movimientos (ENTRADA o no) hay en alguno de estos estados — de
-  // una tienda, o de todas si no se pasa `posConfigId`.
-  countByStatuses(entrada: boolean, statuses: InventoryMovementStatus[], posConfigId?: number): Promise<number> {
+  // Cuántos merma/regalía/degustación esperan que Admin/Finanzas los
+  // confirme, en todas las tiendas.
+  countPending(): Promise<number> {
     return this.prisma.storeInventoryMovement.count({
-      where: {
-        status: { in: statuses },
-        type: this.entradaFilter(entrada),
-        ...(posConfigId === undefined ? {} : { posConfigId }),
-      },
+      where: { status: InventoryMovementStatus.PENDIENTE, type: { not: InventoryMovementType.ENTRADA } },
     });
   }
 
   // Lo que `registeredByEmail` reportó y Admin/Finanzas ya confirmó o
   // rechazó después de `since` — la novedad "resuelto" del Vendedor.
-  countResolvedSince(
-    entrada: boolean,
-    posConfigId: number,
-    registeredByEmail: string,
-    since: Date,
-  ): Promise<number> {
+  countResolvedSince(posConfigId: number, registeredByEmail: string, since: Date): Promise<number> {
     return this.prisma.storeInventoryMovement.count({
       where: {
         posConfigId,
         registeredByEmail,
-        type: this.entradaFilter(entrada),
+        type: { not: InventoryMovementType.ENTRADA },
         status: { in: [InventoryMovementStatus.CONFIRMADO, InventoryMovementStatus.RECHAZADO] },
         resolvedAt: { gt: since },
       },
     });
-  }
-
-  private entradaFilter(entrada: boolean) {
-    return entrada ? InventoryMovementType.ENTRADA : { not: InventoryMovementType.ENTRADA };
   }
 
   async findByIdOrThrow(id: string): Promise<StoreInventoryMovement> {
@@ -125,22 +122,26 @@ export class InventoryMovementsRepository {
     });
   }
 
-  // Admin/Finanzas aceptó la solicitud de stock: el envío va en camino.
-  markAccepted(id: string, acceptedByEmail: string): Promise<StoreInventoryMovement> {
-    return this.prisma.storeInventoryMovement.update({
-      where: { id },
-      data: { status: InventoryMovementStatus.EN_CAMINO, acceptedByEmail, acceptedAt: new Date() },
-    });
-  }
-
-  // Exclusivo del flujo ENTRADA: el Vendedor marca que el envío llegó e
-  // ingresa la cantidad real (ver InventoryMovementsService.receive) —
-  // todavía no resuelve el movimiento, solo lo deja listo para que
-  // Admin/Finanzas lo confirme o rechace con ese dato a la vista.
-  markReceived(id: string, receivedQuantity: number): Promise<StoreInventoryMovement> {
-    return this.prisma.storeInventoryMovement.update({
-      where: { id },
-      data: { status: InventoryMovementStatus.RECIBIDO, receivedQuantity },
+  // Entradas de stock que llegan al confirmar la tienda una solicitud
+  // recibida: ya nacen CONFIRMADAS (lo que llegó es lo que suma).
+  createManyConfirmedEntries(entries: CreateConfirmedEntryData[]) {
+    const now = new Date();
+    return this.prisma.storeInventoryMovement.createMany({
+      data: entries.map((entry) => ({
+        posConfigId: entry.posConfigId,
+        productId: entry.productId,
+        type: InventoryMovementType.ENTRADA,
+        quantity: entry.quantity,
+        receivedQuantity: entry.quantity,
+        note: entry.note,
+        occurredAt: entry.occurredAt,
+        status: InventoryMovementStatus.CONFIRMADO,
+        registeredByEmail: entry.registeredByEmail,
+        registeredByRole: entry.registeredByRole,
+        resolvedByEmail: entry.registeredByEmail,
+        resolvedAt: now,
+        stockRequestId: entry.stockRequestId,
+      })),
     });
   }
 }

@@ -59,6 +59,9 @@ const MODULE_ROLE_CEILING = [
   // module-keys.const.ts) — se siembra para que el panel Permisos y
   // /auth/me lo incluyan desde el día 1.
   { moduleKey: 'dashboard.inventario-movimientos', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
+  // Solicitudes de stock tienda -> planta -> tienda. Es el único módulo
+  // que ve el rol Planta (ver module-keys.const.ts).
+  { moduleKey: 'dashboard.inventario-solicitudes', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR, Role.PLANTA] },
 ];
 
 async function main() {

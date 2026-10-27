@@ -15,6 +15,10 @@ enum Role {
   SUPER_ADMIN
   FINANZAS
   VENDEDOR
+  // Planta (despacho): recibe las solicitudes de stock de las tiendas, dice
+  // qué sí y qué no tiene, despacha y avisa que va en camino. Solo ve
+  // Inventario → Solicitudes (ver MODULE_KEY_CEILING). Sin tienda asignada.
+  PLANTA
 }
 
 model User {
@@ -204,22 +208,19 @@ enum InventoryMovementType {
   ENTRADA
 }
 
-// PENDIENTE solo quando lo registra un VENDEDOR (necesita que Admin o
+// PENDIENTE solo cuando lo registra un VENDEDOR (necesita que Admin o
 // Finanzas lo confirme antes de afectar estimatedQuantity, ver
 // InventoryMovementsService.create). Cuando lo registra SUPER_ADMIN o
 // FINANZAS queda CONFIRMADO de una vez — es la misma persona que hoy
 // hace el conteo físico, no tiene sentido pedirle que se autoconfirme.
 //
-// Flujo de ENTRADA (solicitud de stock de un Vendedor):
-// PENDIENTE (el Vendedor pidió más stock) -> EN_CAMINO (Admin/Finanzas
-// aceptó la solicitud y el envío va en camino, ver
-// InventoryMovementsService.accept) -> RECIBIDO (el Vendedor marcó que ya
-// llegó e ingresó la cantidad real, ver InventoryMovementsService.receive)
-// -> CONFIRMADO (Admin/Finanzas lo da por bueno y recién ahí se suma al
-// stock). En cualquier paso antes de CONFIRMADO, Admin/Finanzas puede
-// pasarlo a RECHAZADO con un motivo (`rejectionReason`) que el Vendedor ve.
-// Los demás tipos nunca pasan por EN_CAMINO/RECIBIDO — van directo de
-// PENDIENTE a CONFIRMADO/RECHAZADO.
+// ENTRADA ya NO tiene flujo de aprobación propio: el stock que llega de
+// planta se pide, se despacha y se recibe con una solicitud
+// (StoreStockRequest). Al confirmar la tienda la recepción, cada línea
+// recibida crea una ENTRADA ya CONFIRMADA ligada a la solicitud
+// (`stockRequestId`). EN_CAMINO y RECIBIDO quedan en el enum solo por las
+// ENTRADA del flujo anterior (solicitud -> aceptar -> recibir -> confirmar),
+// que ya no se pueden avanzar; los otros tipos nunca los usan.
 enum InventoryMovementStatus {
   PENDIENTE
   EN_CAMINO
@@ -267,6 +268,12 @@ model StoreInventoryMovement {
   acceptedAt      DateTime?
   rejectionReason String?
 
+  // Solo ENTRADA creada al recibir una solicitud de stock: de cuál vino
+  // (para el detalle del Registro). null en mermas, regalías, degustaciones
+  // y en las ENTRADA del flujo anterior.
+  stockRequestId String? @db.ObjectId
+
+  @@index([stockRequestId])
   @@map("store_inventory_movements")
 }
 
@@ -303,4 +310,92 @@ model StoreInventoryCountLog {
 
   @@index([posConfigId, countedAt])
   @@map("store_inventory_count_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Solicitudes de stock (tienda -> planta -> tienda)
+//
+// Reemplaza el flujo viejo de ENTRADA (un producto por solicitud, aceptado y
+// confirmado por Admin/Finanzas). Ahora una solicitud es un PEDIDO con
+// varios productos, como el "Formato envío a sucursales" que usa despacho:
+//
+//   SOLICITADA      la tienda lo envió; planta todavía no lo toma.
+//   EN_PREPARACION  planta lo tomó y está respondiendo: qué sí, qué no y qué
+//                   agrega (se puede guardar avance).
+//   EN_CAMINO       planta despachó (completo o parcial); la tienda recibe un
+//                   aviso para confirmar cuando llegue.
+//   RECIBIDA        la tienda confirmó lo que llegó, línea por línea; recién
+//                   ahí se suma al inventario de la tienda.
+//   CANCELADA       la tienda (solo antes de que planta la tome) o Admin /
+//                   Finanzas la cancelaron, con motivo.
+//
+// Cada paso queda en `events` (el seguimiento que ve Admin). El nombre y la
+// categoría del producto se guardan en la línea (foto del momento): el PDF y
+// el historial no dependen de que Odoo siga teniendo el mismo nombre.
+// ---------------------------------------------------------------------------
+enum StockRequestStatus {
+  SOLICITADA
+  EN_PREPARACION
+  EN_CAMINO
+  RECIBIDA
+  CANCELADA
+}
+
+type StockRequestLine {
+  productId         Int
+  productName       String
+  categoryName      String
+  // "unidad" | "kg" — misma unidad que InventoryItemDoc.unit.
+  unit              String
+  // Lo que pidió la tienda. 0 en las líneas que agregó planta.
+  requestedQuantity Float
+  // Lo que planta envía. null mientras planta no responde esa línea; 0 =
+  // "no hay".
+  sentQuantity      Float?
+  // Lo que la tienda confirma que llegó. null hasta confirmar la recepción.
+  receivedQuantity  Float?
+  // true = producto que planta agregó al pedido (la tienda no lo pidió).
+  addedByPlant      Boolean @default(false)
+  plantNote         String?
+  storeNote         String?
+}
+
+type StockRequestEvent {
+  status  StockRequestStatus
+  at      DateTime
+  byEmail String
+  byRole  Role
+  note    String?
+}
+
+model StoreStockRequest {
+  id             String              @id @default(auto()) @map("_id") @db.ObjectId
+  // Número corrido (SOL-0001), el "Número de Requisición" del formato.
+  number         Int                 @unique
+  posConfigId    Int
+  status         StockRequestStatus
+  // Nota general de la tienda al pedir.
+  note           String?
+  lines          StockRequestLine[]
+  events         StockRequestEvent[]
+  createdByEmail String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  // Cuándo salió de planta / cuándo la confirmó la tienda — para los tiempos
+  // de entrega (Hora de envío / Hora de recepción del formato).
+  dispatchedAt   DateTime?
+  receivedAt     DateTime?
+
+  @@index([posConfigId, createdAt])
+  @@index([status])
+  @@map("store_stock_requests")
+}
+
+// Contadores corridos (ej. el número de las solicitudes). `id` es el nombre
+// del contador; `seq` el último número entregado.
+model Counter {
+  id  String @id @map("_id")
+  seq Int
+
+  @@map("counters")
 }

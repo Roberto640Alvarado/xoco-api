@@ -13,7 +13,7 @@ export class UpdateUserDto {
   name?: string;
 
   @ApiProperty({ enum: Role, example: Role.FINANZAS })
-  @IsEnum(Role, { message: 'El rol debe ser SUPER_ADMIN, FINANZAS o VENDEDOR.' })
+  @IsEnum(Role, { message: 'El rol debe ser SUPER_ADMIN, FINANZAS, VENDEDOR o PLANTA.' })
   role: Role;
 
   // Mismo criterio que CreateUserDto: requerido solo si role=VENDEDOR,

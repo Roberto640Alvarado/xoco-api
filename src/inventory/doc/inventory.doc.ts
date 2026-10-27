@@ -7,6 +7,9 @@ export type InventoryUnit = 'unidad' | 'kg';
 export interface InventoryItemDoc {
   productId: number;
   productName: string;
+  // Categoría del producto en Odoo (product.category), sin la raíz "All" —
+  // para presentar el inventario agrupado por categoría.
+  categoryName: string;
   unit: InventoryUnit;
   quantity: number | null;
   // `quantity` (el último conteo real) menos lo vendido en Odoo

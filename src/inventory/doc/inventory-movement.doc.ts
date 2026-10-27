@@ -11,8 +11,8 @@ export interface InventoryMovementDoc {
   productName: string;
   type: InventoryMovementType;
   quantity: number;
-  // Solo ENTRADA la llena (ver InventoryMovementsService.receive) — null
-  // en los demás tipos y en ENTRADA que todavía no se marcó RECIBIDO.
+  // Solo ENTRADA la llena: lo que de verdad llegó de una solicitud — null
+  // en los demás tipos.
   receivedQuantity: number | null;
   note: string | null;
   occurredAt: Date;
@@ -21,9 +21,6 @@ export interface InventoryMovementDoc {
   registeredByRole: Role;
   resolvedByEmail: string | null;
   resolvedAt: Date | null;
-  // Solo ENTRADA: quién/cuándo aceptó la solicitud (pasó a EN_CAMINO).
-  acceptedByEmail: string | null;
-  acceptedAt: Date | null;
   // Motivo con el que Admin/Finanzas rechazó — null si no está rechazado.
   rejectionReason: string | null;
 }

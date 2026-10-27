@@ -6,7 +6,7 @@ import type { ModuleKey } from '../../common/constants/module-keys.const.js';
 
 export class SetRoleModuleAccessDto {
   @ApiProperty({ enum: Role, example: Role.VENDEDOR })
-  @IsIn(Object.values(Role), { message: 'El rol debe ser SUPER_ADMIN, FINANZAS o VENDEDOR.' })
+  @IsIn(Object.values(Role), { message: 'El rol debe ser SUPER_ADMIN, FINANZAS, VENDEDOR o PLANTA.' })
   role: Role;
 
   @ApiProperty({ enum: MODULE_KEYS, example: 'dashboard.venta-diaria' })

@@ -10,12 +10,4 @@ export class FindMovementNotificationsQueryDto {
   @IsOptional()
   @IsDateString()
   sinceMovements?: string;
-
-  @ApiPropertyOptional({
-    example: '2026-10-11T15:00:00.000Z',
-    description: 'Solo VENDEDOR: lo mismo que sinceMovements, pero para Solicitudes (entradas de stock).',
-  })
-  @IsOptional()
-  @IsDateString()
-  sinceRequests?: string;
 }

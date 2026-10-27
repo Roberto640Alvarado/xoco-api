@@ -33,6 +33,7 @@ export const MODULE_KEYS = [
   'dashboard.cierre-mes',
   'dashboard.inventario',
   'dashboard.inventario-movimientos',
+  'dashboard.inventario-solicitudes',
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -87,4 +88,8 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   // 'dashboard.inventario' (el conteo físico completo, que sigue siendo
   // solo de Admin/Finanzas).
   'dashboard.inventario-movimientos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
+  // Solicitudes de stock (tienda -> planta -> tienda). La tienda pide y
+  // confirma lo recibido, Planta responde y despacha, Admin/Finanzas ven
+  // todo el seguimiento. Es el ÚNICO módulo que ve Planta.
+  'dashboard.inventario-solicitudes': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR, Role.PLANTA],
 };
