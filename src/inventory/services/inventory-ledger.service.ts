@@ -29,7 +29,9 @@ export class InventoryLedgerService {
     private readonly odooService: OdooService,
   ) {}
 
-  private async findSales(
+  // Pública: el Kardex (InventoryKardexService) usa las mismas ventas,
+  // una línea por producto vendido, con la hora exacta de la orden.
+  async findSales(
     posConfigId: number,
     utcFrom: string,
     utcTo: string,

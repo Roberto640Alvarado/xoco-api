@@ -29,9 +29,8 @@ interface SoldLine {
 // EN ODOO COMO INVENTARIO INICIAL"). `estimatedQuantity` ya descuenta
 // ventas (desde Odoo) y mermas/regalías/degustaciones CONFIRMADAS, y ya
 // SUMA las entradas (envíos planta→tienda) CONFIRMADAS — todo desde
-// InventoryMovementsRepository (segundo y tercer tramo). La única pieza
-// del diagrama que vive fuera de nuestra base son los reportes Kardex/
-// Existencias, que se consultan directo en Odoo.
+// InventoryMovementsRepository (segundo y tercer tramo). El Kardex por
+// tienda vive en InventoryKardexService, con el mismo criterio de saldo.
 @Injectable()
 export class InventoryService {
   private readonly logger = new Logger(InventoryService.name);

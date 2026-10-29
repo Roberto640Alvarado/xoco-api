@@ -15,3 +15,6 @@ El comentario por línea y los agregados ya existían; faltaba ligar el sustitut
 
 ## Resultado final
 `tsc` y oxlint sin errores, 104 tests en verde.
+
+## Ajuste: el Admin también pide stock
+- `POST /inventory/requests` y `GET .../catalog` aceptan SUPER_ADMIN. `CreateStockRequestDto.posConfigId` (obligatorio para el Admin, validado contra las tiendas activas de Odoo; para el Vendedor se ignora y se usa su tienda). Tests nuevos.

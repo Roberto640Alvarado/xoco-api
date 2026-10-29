@@ -95,6 +95,18 @@ describe('StockRequestsService', () => {
       expect(lineOf(doc, 400)).toMatchObject({ unit: 'kg', requestedQuantity: 2.5 });
     });
 
+    it('el Admin pide para la tienda que elige; la tienda tiene que existir', async () => {
+      const doc = await ctx.service.create({ posConfigId: CENTRO, lines: [{ productId: 100, quantity: 3 }] }, USERS.admin);
+      expect(doc).toMatchObject({ posConfigId: CENTRO, storeName: 'Tienda Centro', createdByEmail: 'admin@xoco.com' });
+      await expect(ctx.service.create({ lines: [{ productId: 100, quantity: 3 }] }, USERS.admin)).rejects.toThrow('Elige la tienda');
+      await expect(ctx.service.create({ posConfigId: 999, lines: [{ productId: 100, quantity: 3 }] }, USERS.admin)).rejects.toThrow('no es válida');
+    });
+
+    it('el Vendedor siempre pide para su tienda aunque mande otra', async () => {
+      const doc = await ctx.service.create({ posConfigId: CENTRO, lines: [{ productId: 100, quantity: 3 }] }, USERS.tienda);
+      expect(doc.posConfigId).toBe(RAMBLAS);
+    });
+
     it('exige que Inventario esté habilitado para la tienda y que el usuario tenga tienda', async () => {
       ctx.access.assertEnabledFor.mockRejectedValueOnce(new ForbiddenException('no habilitado'));
       await expect(createRequest(ctx)).rejects.toBeInstanceOf(ForbiddenException);

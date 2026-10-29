@@ -31,6 +31,16 @@ export class StockRequestLineInputDto {
 }
 
 export class CreateStockRequestDto {
+  @ApiPropertyOptional({
+    example: 3,
+    description:
+      'Tienda (pos.config) para la que se pide. Obligatoria cuando pide el Admin; para un Vendedor se ignora y se usa su tienda.',
+  })
+  @IsOptional()
+  @IsInt({ message: 'La tienda (posConfigId) debe ser un número entero.' })
+  @Min(1)
+  posConfigId?: number;
+
   @ApiPropertyOptional({ description: 'Nota general para planta (ej. "urgente para el fin de semana").' })
   @IsOptional()
   @IsString()

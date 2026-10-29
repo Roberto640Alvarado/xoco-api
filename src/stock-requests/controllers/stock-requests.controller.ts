@@ -12,7 +12,7 @@ import { ReceiveStockRequestDto } from '../dto/receive-stock-request.dto.js';
 import { CancelStockRequestDto } from '../dto/cancel-stock-request.dto.js';
 import { FindStockRequestsQueryDto } from '../dto/find-stock-requests-query.dto.js';
 
-// Inventario → Solicitudes: la tienda pide stock, planta responde y
+// Inventario → Solicitudes: la tienda (o el Admin por ella) pide stock, planta responde y
 // despacha, la tienda confirma lo recibido. Admin/Finanzas solo ven el
 // seguimiento (y cancelan). Cada acción lleva su @Roles propio; lo que
 // depende del estado y de la tienda lo decide StockRequestsService.
@@ -25,7 +25,7 @@ export class StockRequestsController {
   constructor(private readonly requestsService: StockRequestsService) {}
 
   @Get('catalog')
-  @Roles(Role.VENDEDOR, Role.PLANTA)
+  @Roles(Role.SUPER_ADMIN, Role.VENDEDOR, Role.PLANTA)
   @ApiOperation({
     summary: 'Productos que se pueden pedir, con su categoría y unidad.',
     description: 'Catálogo activo de Odoo (solo lectura). La tienda lo usa para pedir y planta para agregar productos.',
@@ -61,10 +61,12 @@ export class StockRequestsController {
   }
 
   @Post()
-  @Roles(Role.VENDEDOR)
+  @Roles(Role.VENDEDOR, Role.SUPER_ADMIN)
   @ApiOperation({
-    summary: 'La tienda pide stock a planta.',
-    description: 'Crea una solicitud SOLICITADA para la tienda del usuario con los productos indicados.',
+    summary: 'Pide stock a planta para una tienda.',
+    description:
+      'Crea una solicitud SOLICITADA con los productos indicados. El Vendedor pide para su propia tienda; el Admin elige la tienda con posConfigId (obligatorio). ' +
+      'La tienda confirma la recepción igual que siempre.',
   })
   create(@Body() dto: CreateStockRequestDto, @User() user: AuthenticatedUser) {
     return this.requestsService.create(dto, user);

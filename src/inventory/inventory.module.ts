@@ -7,6 +7,7 @@ import { InventoryAccessService } from './services/inventory-access.service.js';
 import { InventoryAccessRepository } from './repositories/inventory-access.repository.js';
 import { InventoryService } from './services/inventory.service.js';
 import { InventoryLedgerService } from './services/inventory-ledger.service.js';
+import { InventoryKardexService } from './services/inventory-kardex.service.js';
 import { InventoryMovementsService } from './services/inventory-movements.service.js';
 import { InventoryRepository } from './repositories/inventory.repository.js';
 import { InventoryMovementsRepository } from './repositories/inventory-movements.repository.js';
@@ -17,6 +18,7 @@ import { InventoryMovementsRepository } from './repositories/inventory-movements
   providers: [
     InventoryService,
     InventoryLedgerService,
+    InventoryKardexService,
     InventoryMovementsService,
     InventoryAccessService,
     InventoryRepository,

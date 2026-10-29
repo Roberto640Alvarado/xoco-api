@@ -257,9 +257,23 @@ export class StockRequestsService {
   // 1. La tienda pide
   // ---------------------------------------------------------------------
 
+  // Para quién es la solicitud: el Vendedor siempre para SU tienda (lo que
+  // mande el cliente se ignora); el Admin elige la tienda, que tiene que ser
+  // una tienda activa real.
+  private async resolveRequestStore(dto: CreateStockRequestDto, user: AuthenticatedUser): Promise<number> {
+    if (user.role === Role.VENDEDOR) {
+      if (user.posConfigId == null) throw new ForbiddenException('Tu usuario no tiene una tienda asignada.');
+      await this.accessService.assertEnabledFor(user, user.posConfigId);
+      return user.posConfigId;
+    }
+    if (dto.posConfigId == null) throw new BadRequestException('Elige la tienda para la que haces la solicitud.');
+    const storeNames = await this.findStoreNames();
+    if (!storeNames.has(dto.posConfigId)) throw new BadRequestException('La tienda seleccionada no es válida.');
+    return dto.posConfigId;
+  }
+
   async create(dto: CreateStockRequestDto, user: AuthenticatedUser): Promise<StockRequestDoc> {
-    if (user.posConfigId == null) throw new ForbiddenException('Tu usuario no tiene una tienda asignada.');
-    await this.accessService.assertEnabledFor(user, user.posConfigId);
+    const posConfigId = await this.resolveRequestStore(dto, user);
 
     const productIds = dto.lines.map((line) => line.productId);
     if (new Set(productIds).size !== productIds.length) {
@@ -287,7 +301,7 @@ export class StockRequestsService {
 
     const request = await this.repository.create({
       number: await this.repository.nextNumber(),
-      posConfigId: user.posConfigId,
+      posConfigId,
       status: StockRequestStatus.SOLICITADA,
       note: dto.note?.trim() || null,
       lines,

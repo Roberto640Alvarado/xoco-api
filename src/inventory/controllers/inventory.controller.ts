@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Put, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Role } from '../../generated/prisma/index.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { User } from '../../common/decorators/user.decorator.js';
@@ -8,8 +8,10 @@ import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.
 import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { InventoryLedgerService } from '../services/inventory-ledger.service.js';
+import { InventoryKardexService } from '../services/inventory-kardex.service.js';
 import { InventoryAccessService } from '../services/inventory-access.service.js';
 import { FindInventoryLedgerQueryDto } from '../dto/find-inventory-ledger-query.dto.js';
+import { FindInventoryKardexQueryDto } from '../dto/find-inventory-kardex-query.dto.js';
 import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 
 // Inventario por tienda. La captura del conteo físico (PUT) es
@@ -26,6 +28,7 @@ export class InventoryController {
   constructor(
     private readonly inventoryService: InventoryService,
     private readonly ledgerService: InventoryLedgerService,
+    private readonly kardexService: InventoryKardexService,
     private readonly accessService: InventoryAccessService,
   ) {}
 
@@ -72,5 +75,24 @@ export class InventoryController {
     assertOwnStoreOrThrow(user, posConfigId);
     await this.accessService.assertEnabledFor(user, posConfigId);
     return this.ledgerService.findLedger(posConfigId, query);
+  }
+
+  @Get('stores/:posConfigId/kardex')
+  @ApiOperation({
+    summary: 'Kardex de inventario de una tienda: saldo inicial, entradas, salidas, ajustes por conteo y saldo final por producto.',
+    description:
+      'Parte del último conteo físico de cada producto y suma/resta ventas de Odoo y movimientos CONFIRMADOS, con el saldo después de cada línea. ' +
+      'Las ventas seguidas de un mismo día salen en una sola línea. El Vendedor solo pide la de su tienda.',
+  })
+  @ApiParam({ name: 'posConfigId', description: 'id de pos.config (tienda).' })
+  @ApiResponse({ status: 403, description: 'Otra tienda (Vendedor) o Inventario no habilitado.' })
+  async findKardex(
+    @Param('posConfigId', ParseIntPipe) posConfigId: number,
+    @Query() query: FindInventoryKardexQueryDto,
+    @User() user: AuthenticatedUser,
+  ) {
+    assertOwnStoreOrThrow(user, posConfigId);
+    await this.accessService.assertEnabledFor(user, posConfigId);
+    return this.kardexService.findKardex(posConfigId, query);
   }
 }
