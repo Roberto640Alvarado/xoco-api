@@ -15,6 +15,7 @@ interface UpdateUserData {
   name: string | null;
   role: Role;
   posConfigId: number | null;
+  inventoryEnabled: boolean;
 }
 
 // Único acceso a datos permitido a la colección users — el resto de la

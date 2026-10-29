@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
 import { Role } from '../../generated/prisma/index.js';
 
 export class UpdateUserDto {
@@ -23,4 +23,12 @@ export class UpdateUserDto {
   @IsInt({ message: 'La tienda (posConfigId) debe ser un número entero.' })
   @Min(1)
   posConfigId?: number;
+
+  // Acceso individual a Inventario — solo se guarda para role=VENDEDOR
+  // (para cualquier otro rol queda en false, ver UsersService.updateUser).
+  // Si se omite, se conserva el valor actual.
+  @ApiProperty({ required: false, example: true, description: 'Acceso individual a Inventario — solo aplica si role=VENDEDOR.' })
+  @IsOptional()
+  @IsBoolean({ message: 'El acceso a Inventario debe ser verdadero o falso.' })
+  inventoryEnabled?: boolean;
 }

@@ -4,9 +4,11 @@ import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.inte
 import { InventoryAccessRepository } from '../repositories/inventory-access.repository.js';
 import { InventoryAccessDoc } from '../doc/inventory-access.doc.js';
 
-// Habilitación del módulo de Inventario por tienda. Admin y Finanzas
-// trabajan con el módulo siempre (cargan primero el stock manual de cada
-// tienda); el Vendedor solo entra cuando el Super admin habilitó SU tienda.
+// Habilitación del módulo de Inventario. Admin y Finanzas trabajan con el
+// módulo siempre (cargan primero el stock manual de cada tienda); el
+// Vendedor solo entra cuando el Super admin habilitó SU tienda Y además le
+// dio acceso a él en particular (User.inventoryEnabled, desde Usuarios →
+// Editar).
 @Injectable()
 export class InventoryAccessService {
   constructor(private readonly repository: InventoryAccessRepository) {}
@@ -24,12 +26,16 @@ export class InventoryAccessService {
   // Vendedor; Admin/Finanzas siempre pasan.
   async isEnabledFor(user: AuthenticatedUser, posConfigId: number | null): Promise<boolean> {
     if (user.role !== Role.VENDEDOR) return true;
+    if (!user.inventoryEnabled) return false;
     if (posConfigId == null) return false;
     return this.repository.isEnabled(posConfigId);
   }
 
   async assertEnabledFor(user: AuthenticatedUser, posConfigId: number | null): Promise<void> {
     if (await this.isEnabledFor(user, posConfigId)) return;
+    if (user.role === Role.VENDEDOR && !user.inventoryEnabled) {
+      throw new ForbiddenException('Todavía no tienes acceso a Inventario.');
+    }
     throw new ForbiddenException('El inventario todavía no está habilitado para tu tienda.');
   }
 }

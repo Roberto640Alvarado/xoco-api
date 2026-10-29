@@ -139,7 +139,8 @@ export class SalesController {
     return this.salesService.findDailySummary(query);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  // Planta también: elige de qué tienda ver el inventario (solo lectura).
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR, Role.PLANTA)
   @Get('stores')
   @ApiOperation({
     summary: 'Tiendas activas (pos.config) — para el filtro del dashboard',

@@ -33,6 +33,12 @@ model User {
   // esta tienda, el servidor lo fuerza sin importar lo que mande el
   // cliente. null para SUPER_ADMIN/FINANZAS.
   posConfigId Int?
+  // Acceso individual a Inventario — SOLO aplica a role=VENDEDOR. Además de
+  // que su tienda esté habilitada (StoreInventoryAccess), el Vendedor
+  // necesita este permiso propio: así Super admin decide QUIÉN de cada
+  // tienda entra (ej. un piloto con un solo usuario). Opcional porque los
+  // documentos viejos de Mongo no traen el campo: null/ausente = sin acceso.
+  inventoryEnabled Boolean?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -356,6 +362,10 @@ type StockRequestLine {
   receivedQuantity  Float?
   // true = producto que planta agregó al pedido (la tienda no lo pidió).
   addedByPlant      Boolean @default(false)
+  // Solo en líneas agregadas por planta: el producto PEDIDO al que
+  // sustituye ("piden tiramisú, no hay, se manda brownie"). null = agregado
+  // suelto, sin reemplazar nada.
+  replacesProductId Int?
   plantNote         String?
   storeNote         String?
 }

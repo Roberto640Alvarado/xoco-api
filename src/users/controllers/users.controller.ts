@@ -80,7 +80,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Edita correo, nombre y rol de una cuenta existente.' })
+  @ApiOperation({ summary: 'Edita correo, nombre, rol, tienda y acceso a Inventario (Vendedor) de una cuenta existente.' })
   @ApiResponse({ status: 200, type: UserResponseDoc })
   @ApiResponse({ status: 400, description: 'El correo o el rol son inválidos.' })
   @ApiResponse({ status: 403, description: 'Un SUPER_ADMIN no puede cambiar su propio rol.' })

@@ -54,7 +54,7 @@ const MODULE_ROLE_CEILING = [
   // Inventario (Conteo y Registro): Vendedor solo LEE el de su tienda; la
   // captura del conteo es exclusiva de Admin/Finanzas (ver
   // module-keys.const.ts).
-  { moduleKey: 'dashboard.inventario', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR] },
+  { moduleKey: 'dashboard.inventario', roles: [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR, Role.PLANTA] },
   // Segundo tramo: Vendedor sí entra a merma/regalías/degustaciones (ver
   // module-keys.const.ts) — se siembra para que el panel Permisos y
   // /auth/me lo incluyan desde el día 1.

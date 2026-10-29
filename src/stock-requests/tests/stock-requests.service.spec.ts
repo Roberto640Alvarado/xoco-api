@@ -176,6 +176,38 @@ describe('StockRequestsService', () => {
       expect(lineOf(saved, 100).sentQuantity).toBe(9);
     });
 
+    it('agrega un sustituto "en lugar de" un producto pedido, con su comentario', async () => {
+      const doc = await createRequest(ctx);
+      const saved = await ctx.service.savePlantResponse(
+        doc.id,
+        {
+          lines: [
+            { productId: 100, sentQuantity: 10 },
+            { productId: 200, sentQuantity: 0, note: 'No hay' },
+            { productId: 101, sentQuantity: 6, added: true, replacesProductId: 200, note: 'Va esta en su lugar' },
+          ],
+        },
+        USERS.planta,
+      );
+
+      expect(lineOf(saved, 101)).toMatchObject({ addedByPlant: true, replacesProductId: 200, plantNote: 'Va esta en su lugar' });
+      expect(lineOf(saved, 100).replacesProductId).toBeNull();
+    });
+
+    it('un sustituto solo reemplaza a un producto que la tienda pidió', async () => {
+      const doc = await createRequest(ctx);
+      await expect(
+        ctx.service.savePlantResponse(
+          doc.id,
+          { lines: [{ productId: 300, sentQuantity: 2, added: true, replacesProductId: 101 }] },
+          USERS.planta,
+        ),
+      ).rejects.toThrow('no pidió');
+      await expect(
+        ctx.service.savePlantResponse(doc.id, { lines: [{ productId: 100, sentQuantity: 2, replacesProductId: 200 }] }, USERS.planta),
+      ).rejects.toThrow('solo un producto agregado');
+    });
+
     it('no deja agregar un producto nuevo sin marcarlo como agregado', async () => {
       const doc = await createRequest(ctx);
       await expect(

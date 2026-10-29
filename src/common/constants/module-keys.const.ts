@@ -81,8 +81,9 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   'dashboard.cierre-mes': [Role.SUPER_ADMIN, Role.FINANZAS],
   // Inventario (Conteo y Registro): Vendedor SOLO LEE el de su propia
   // tienda (assertOwnStoreOrThrow); la captura del conteo (PUT) sigue
-  // siendo exclusiva de Admin/Finanzas vía @Roles en el método.
-  'dashboard.inventario': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
+  // siendo exclusiva de Admin/Finanzas vía @Roles en el método. Planta
+  // solo LEE el stock de cada tienda (GET .../items), nunca el Registro.
+  'dashboard.inventario': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR, Role.PLANTA],
   // Segundo tramo: merma/regalías/degustaciones — Vendedor SÍ entra acá
   // (reporta las de su propia tienda), a diferencia de
   // 'dashboard.inventario' (el conteo físico completo, que sigue siendo
@@ -90,6 +91,6 @@ export const MODULE_KEY_CEILING: Record<ModuleKey, Role[]> = {
   'dashboard.inventario-movimientos': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR],
   // Solicitudes de stock (tienda -> planta -> tienda). La tienda pide y
   // confirma lo recibido, Planta responde y despacha, Admin/Finanzas ven
-  // todo el seguimiento. Es el ÚNICO módulo que ve Planta.
+  // todo el seguimiento. Planta además solo lee el stock (dashboard.inventario).
   'dashboard.inventario-solicitudes': [Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR, Role.PLANTA],
 };

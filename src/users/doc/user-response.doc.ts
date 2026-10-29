@@ -1,4 +1,4 @@
-import { Expose } from 'class-transformer';
+import { Expose, Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '../../generated/prisma/index.js';
 
@@ -29,6 +29,13 @@ export class UserResponseDoc {
   @Expose()
   @ApiProperty({ required: false, nullable: true })
   posConfigId: number | null;
+
+  // Acceso individual a Inventario — solo tiene efecto para role=VENDEDOR.
+  // null/ausente en Mongo se expone como false.
+  @Expose()
+  @Transform(({ value }) => value === true)
+  @ApiProperty({ description: 'Acceso individual a Inventario (solo aplica a Vendedores).' })
+  inventoryEnabled: boolean;
 
   @Expose()
   @ApiProperty()

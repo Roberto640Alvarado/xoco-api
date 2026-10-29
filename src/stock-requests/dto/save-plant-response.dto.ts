@@ -44,6 +44,18 @@ export class PlantLineInputDto {
   @IsOptional()
   @IsBoolean()
   added?: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 200,
+    description:
+      'Solo para productos agregados: id del producto PEDIDO al que sustituye (ej. no hay tiramisú y se manda brownie). ' +
+      'Debe ser un producto que la tienda pidió en esta solicitud.',
+  })
+  @ValidateIf((line: PlantLineInputDto) => line.replacesProductId !== null && line.replacesProductId !== undefined)
+  @IsInt()
+  @Min(1)
+  replacesProductId?: number | null;
 }
 
 // Mismo cuerpo para guardar avance (PUT .../response) y para despachar

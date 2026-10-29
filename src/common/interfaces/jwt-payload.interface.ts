@@ -15,4 +15,7 @@ export interface AuthenticatedUser {
   email: string;
   role: Role;
   posConfigId: number | null;
+  // Permiso individual de Inventario (solo cuenta para VENDEDOR — ver
+  // InventoryAccessService.isEnabledFor).
+  inventoryEnabled: boolean;
 }

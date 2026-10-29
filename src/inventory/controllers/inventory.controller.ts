@@ -15,7 +15,8 @@ import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 // Inventario por tienda. La captura del conteo físico (PUT) es
 // centralizada: solo Admin/Finanzas. El Vendedor puede LEER el stock y el
 // Registro de SU tienda (assertOwnStoreOrThrow -> 403 si pide otra), nunca
-// escribir.
+// escribir. Planta (despacho) puede LEER el stock de CUALQUIER tienda para
+// saber qué mandar — nunca el Registro ni capturar conteos.
 @ApiTags('inventory')
 @ApiBearerAuth()
 @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
@@ -31,6 +32,7 @@ export class InventoryController {
   // Las pantallas de Solicitudes y Movimientos eligen el producto de esta
   // lista: basta con tener Conteo y Registro o Movimientos y solicitudes.
   @RequiresModule('dashboard.inventario', 'dashboard.inventario-movimientos')
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR, Role.PLANTA)
   @Get('stores/:posConfigId/items')
   @ApiOperation({
     summary: 'Catálogo completo de Odoo cruzado con el inventario ya capturado para una tienda.',

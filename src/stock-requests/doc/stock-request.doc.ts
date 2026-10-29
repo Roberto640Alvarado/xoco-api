@@ -21,6 +21,8 @@ export interface StockRequestLineDoc {
   /** Recibido menos enviado (la columna DIF del formato). null si falta alguno. */
   difference: number | null;
   addedByPlant: boolean;
+  /** Solo en líneas agregadas por planta: el producto pedido al que sustituye. null = agregado suelto. */
+  replacesProductId: number | null;
   plantNote: string | null;
   storeNote: string | null;
 }

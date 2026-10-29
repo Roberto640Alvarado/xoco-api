@@ -12,8 +12,8 @@ export const RAMBLAS = 3;
 export const CENTRO = 4;
 
 export const USERS = {
-  tienda: { id: 'u1', email: 'ramblas@xoco.com', role: Role.VENDEDOR, posConfigId: RAMBLAS } as AuthenticatedUser,
-  otraTienda: { id: 'u2', email: 'centro@xoco.com', role: Role.VENDEDOR, posConfigId: CENTRO } as AuthenticatedUser,
+  tienda: { id: 'u1', email: 'ramblas@xoco.com', role: Role.VENDEDOR, posConfigId: RAMBLAS, inventoryEnabled: true } as AuthenticatedUser,
+  otraTienda: { id: 'u2', email: 'centro@xoco.com', role: Role.VENDEDOR, posConfigId: CENTRO, inventoryEnabled: true } as AuthenticatedUser,
   planta: { id: 'u3', email: 'planta@xoco.com', role: Role.PLANTA, posConfigId: null } as AuthenticatedUser,
   admin: { id: 'u4', email: 'admin@xoco.com', role: Role.SUPER_ADMIN, posConfigId: null } as AuthenticatedUser,
   finanzas: { id: 'u5', email: 'fin@xoco.com', role: Role.FINANZAS, posConfigId: null } as AuthenticatedUser,

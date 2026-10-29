@@ -130,6 +130,7 @@ export class StockRequestsService {
           ? roundQuantity(line.receivedQuantity - line.sentQuantity)
           : null,
       addedByPlant: line.addedByPlant,
+      replacesProductId: line.replacesProductId ?? null,
       plantNote: line.plantNote,
       storeNote: line.storeNote,
     }));
@@ -278,6 +279,7 @@ export class StockRequestsService {
         sentQuantity: null,
         receivedQuantity: null,
         addedByPlant: false,
+        replacesProductId: null,
         plantNote: null,
         storeNote: null,
       };
@@ -354,6 +356,7 @@ export class StockRequestsService {
             sentQuantity: null,
             receivedQuantity: null,
             addedByPlant: true,
+            replacesProductId: null,
             plantNote: null,
             storeNote: null,
           },
@@ -361,17 +364,35 @@ export class StockRequestsService {
         ),
       );
     }
+    this.assertReplacements(lines);
     return lines;
   }
 
   private withPlantInput(line: RequestLine, input: SavePlantResponseDto['lines'][number]): RequestLine {
     const sent = input.sentQuantity ?? null;
     if (sent !== null) this.assertQuantity(line.unit, sent, line.productName);
+    const replacesProductId = input.replacesProductId ?? null;
+    if (replacesProductId !== null && !line.addedByPlant) {
+      throw new BadRequestException(`"${line.productName}" lo pidió la tienda: solo un producto agregado puede ir en lugar de otro.`);
+    }
     return {
       ...line,
       sentQuantity: sent === null ? null : roundQuantity(sent),
+      replacesProductId: line.addedByPlant ? replacesProductId : null,
       plantNote: input.note?.trim() || null,
     };
+  }
+
+  // Un sustituto ("en lugar de") siempre apunta a un producto que la tienda
+  // SÍ pidió en esta solicitud — nunca a otro agregado ni a algo ajeno.
+  private assertReplacements(lines: RequestLine[]): void {
+    const requestedIds = new Set(lines.filter((line) => !line.addedByPlant).map((line) => line.productId));
+    for (const line of lines) {
+      if (line.replacesProductId == null) continue;
+      if (!requestedIds.has(line.replacesProductId)) {
+        throw new BadRequestException(`"${line.productName}" va en lugar de un producto que la tienda no pidió en esta solicitud.`);
+      }
+    }
   }
 
   // Guarda el avance de planta sin despachar (puede seguir mañana). La

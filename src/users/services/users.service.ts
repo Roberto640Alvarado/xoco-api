@@ -144,12 +144,17 @@ export class UsersService {
     }
 
     const posConfigId = await this.resolvePosConfigId(dto.role, dto.posConfigId);
+    // El acceso individual a Inventario solo existe para Vendedores; si se
+    // omite en el request se conserva el que ya tenía.
+    const inventoryEnabled =
+      dto.role === Role.VENDEDOR ? (dto.inventoryEnabled ?? target.inventoryEnabled === true) : false;
 
     return this.usersRepository.updateUser(targetUserId, {
       email,
       name: dto.name?.trim() || null,
       role: dto.role,
       posConfigId,
+      inventoryEnabled,
     });
   }
 }
