@@ -409,3 +409,43 @@ model Counter {
 
   @@map("counters")
 }
+
+// ---------------------------------------------------------------------------
+// Recetas por tienda
+//
+// Productos que se venden en el POS pero no se guardan en bodega (ej. un
+// Americano): cada venta descuenta sus ingredientes (ej. 1 cápsula
+// Pacamara) en vez del producto vendido. Cada tienda tiene las suyas porque
+// en cada una se preparan distinto. Solo SUPER_ADMIN las configura
+// (Administración → Recetas). Una receta es de un solo nivel: un
+// ingrediente no puede ser a su vez un producto con receta.
+//
+// Los nombres y la unidad se guardan como foto del momento (igual que en
+// las solicitudes): el Kardex y el Registro no dependen de Odoo para
+// decir "Americano ×2".
+// ---------------------------------------------------------------------------
+type RecipeComponent {
+  productId   Int
+  productName String
+  // "unidad" | "kg"
+  unit        String
+  // Cuánto se gasta de este ingrediente por CADA unidad vendida.
+  quantity    Float
+}
+
+model StoreRecipe {
+  id             String            @id @default(auto()) @map("_id") @db.ObjectId
+  posConfigId    Int
+  // Producto que se vende (el que sale en el ticket del POS).
+  productId      Int
+  productName    String
+  components     RecipeComponent[]
+  updatedByEmail String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([posConfigId, productId])
+  @@index([posConfigId])
+  @@map("store_recipes")
+}
+

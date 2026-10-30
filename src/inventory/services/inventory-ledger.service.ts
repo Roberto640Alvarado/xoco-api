@@ -8,6 +8,8 @@ import { InventoryMovementsRepository } from '../repositories/inventory-movement
 import { FindInventoryLedgerQueryDto } from '../dto/find-inventory-ledger-query.dto.js';
 import { InventoryLedgerEntryDoc, InventoryLedgerEntryType } from '../doc/inventory-ledger.doc.js';
 import { InventoryMovementType } from '../../generated/prisma/index.js';
+import { RecipesService } from '../../recipes/services/recipes.service.js';
+import { expandSale, soldProductsAffecting, viaLabel } from '../../recipes/utils/expand-recipes.util.js';
 
 // "2026-10-11 15:04:31" (UTC naive de Odoo) -> Date.
 function fromOdooDateTime(odooDateTime: string): Date {
@@ -27,16 +29,25 @@ export class InventoryLedgerService {
     private readonly inventoryRepository: InventoryRepository,
     private readonly inventoryMovementsRepository: InventoryMovementsRepository,
     private readonly odooService: OdooService,
+    private readonly recipesService: RecipesService,
   ) {}
 
   // Pública: el Kardex (InventoryKardexService) usa las mismas ventas,
-  // una línea por producto vendido, con la hora exacta de la orden.
+  // una línea por producto vendido, con la hora exacta de la orden. Las
+  // ventas de un producto con receta (ej. un Americano) salen como consumo
+  // de sus ingredientes (ej. la cápsula), con "Americano ×2 · ticket".
   async findSales(
     posConfigId: number,
     utcFrom: string,
     utcTo: string,
     productId?: number,
   ): Promise<InventoryLedgerEntryDoc[]> {
+    const recipes = await this.recipesService.findRecipeMap(posConfigId);
+    // Filtrando un producto: también hay que traer las ventas de los
+    // productos cuya receta lo usa.
+    const soldIds = productId ? soldProductsAffecting(productId, recipes) : null;
+    if (soldIds && soldIds.length === 0) return [];
+
     const orders = await fetchAllOdooPages(
       (options) => this.odooService.findPosOrders(options),
       [
@@ -55,7 +66,7 @@ export class InventoryLedgerService {
       (options) => this.odooService.findPosOrderLines(options),
       [
         ['order_id', 'in', orders.map((order) => order.id)],
-        ...(productId ? [['product_id', '=', productId]] : []),
+        ...(soldIds ? [['product_id', 'in', soldIds]] : []),
       ],
       'InventoryLedgerService.findSales (líneas)',
       this.logger,
@@ -65,18 +76,21 @@ export class InventoryLedgerService {
     for (const line of lines) {
       const order = line.order_id ? orderById.get(line.order_id[0]) : undefined;
       if (!order || !line.product_id) continue;
-      entries.push({
-        id: `sale-${line.id}`,
-        occurredAt: fromOdooDateTime(order.date_order),
-        type: InventoryLedgerEntryType.VENTA,
-        direction: 'OUT',
-        productId: line.product_id[0],
-        productName: line.product_id[1],
-        quantity: line.qty,
-        status: null,
-        detail: order.name,
-        registeredBy: null,
-      });
+      for (const sale of expandSale(line.product_id[0], line.qty, recipes)) {
+        if (productId && sale.productId !== productId) continue;
+        entries.push({
+          id: sale.via ? `sale-${line.id}-${sale.productId}` : `sale-${line.id}`,
+          occurredAt: fromOdooDateTime(order.date_order),
+          type: InventoryLedgerEntryType.VENTA,
+          direction: 'OUT',
+          productId: sale.productId,
+          productName: sale.productName ?? line.product_id[1],
+          quantity: sale.quantity,
+          status: null,
+          detail: sale.via ? `${viaLabel(sale.via)} · ${order.name}` : order.name,
+          registeredBy: null,
+        });
+      }
     }
     return entries;
   }

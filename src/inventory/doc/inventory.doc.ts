@@ -20,6 +20,12 @@ export interface InventoryItemDoc {
   // producto nunca se ha contado (no hay de dónde partir) — ver
   // InventoryService.findItemsForStore / estimateQuantity.
   estimatedQuantity: number | null;
+  /**
+   * Si en esta tienda el producto se vende por receta (ej. una bebida): sus
+   * ventas descuentan estos ingredientes y él no lleva existencia
+   * (estimatedQuantity null). null = producto normal.
+   */
+  recipe: { components: { productId: number; productName: string; quantity: number }[] } | null;
   updatedAt: Date | null;
   updatedByEmail: string | null;
 }

@@ -12,6 +12,7 @@ import { FindInventoryKardexQueryDto } from '../dto/find-inventory-kardex-query.
 import { InventoryKardexDoc, InventoryKardexProductDoc } from '../doc/inventory-kardex.doc.js';
 import { InventoryLedgerEntryType } from '../doc/inventory-ledger.doc.js';
 import { KardexEvent, buildProductKardex } from '../utils/kardex.util.js';
+import { RecipesService } from '../../recipes/services/recipes.service.js';
 
 // "2026-10-11 15:04:31" (UTC naive) -> Date.
 function fromOdooDateTime(odooDateTime: string): Date {
@@ -37,6 +38,7 @@ export class InventoryKardexService {
     private readonly movementsRepository: InventoryMovementsRepository,
     private readonly ledgerService: InventoryLedgerService,
     private readonly odooService: OdooService,
+    private readonly recipesService: RecipesService,
   ) {}
 
   async findKardex(posConfigId: number, query: FindInventoryKardexQueryDto): Promise<InventoryKardexDoc> {
@@ -45,7 +47,7 @@ export class InventoryKardexService {
     const to = fromOdooDateTime(utcTo);
     const onlyProduct = (productId: number) => !query.productId || productId === query.productId;
 
-    const [products, stores, countLogs, items] = await Promise.all([
+    const [products, stores, countLogs, items, recipes] = await Promise.all([
       fetchAllOdooPages(
         (options) => this.odooService.findProducts(options),
         [],
@@ -55,6 +57,7 @@ export class InventoryKardexService {
       this.odooService.findPosConfigs({ domain: [['id', '=', posConfigId]] }),
       this.inventoryRepository.findCountLogs(posConfigId, new Date(0), to, query.productId),
       this.inventoryRepository.findManyForStore(posConfigId),
+      this.recipesService.findRecipeMap(posConfigId),
     ]);
 
     // Conteos de partida por producto.
@@ -129,6 +132,9 @@ export class InventoryKardexService {
     const productById = new Map(products.map((product) => [product.id, product]));
     const result: InventoryKardexProductDoc[] = [];
     for (const [productId, list] of events) {
+      // Un producto con receta (ej. una bebida) no se guarda en bodega: sus
+      // ventas ya salen como consumo de sus ingredientes.
+      if (recipes.has(productId)) continue;
       const kardex = buildProductKardex(list, from, to, storeDate);
       if (kardex.openingBalance === null && kardex.rows.length === 0) continue;
       const product = productById.get(productId);

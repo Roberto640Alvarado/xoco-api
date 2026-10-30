@@ -10,6 +10,8 @@ import { InventoryMovementsRepository } from '../repositories/inventory-movement
 import { UpsertInventoryBulkDto } from '../dto/upsert-inventory-bulk.dto.js';
 import { InventoryItemDoc, InventorySavedItemDoc } from '../doc/inventory.doc.js';
 import { InventoryMovementType, StoreInventoryItem, StoreInventoryMovement } from '../../generated/prisma/index.js';
+import { RecipesService } from '../../recipes/services/recipes.service.js';
+import { RecipeMap, expandSale } from '../../recipes/utils/expand-recipes.util.js';
 
 // Una línea vendida en Odoo desde cierta fecha — ver findUnitsSoldSince.
 interface SoldLine {
@@ -39,6 +41,7 @@ export class InventoryService {
     private readonly inventoryRepository: InventoryRepository,
     private readonly inventoryMovementsRepository: InventoryMovementsRepository,
     private readonly odooService: OdooService,
+    private readonly recipesService: RecipesService,
   ) {}
 
   // Todo lo vendido (pos.order.line, vía sus pos.order de esta tienda)
@@ -49,7 +52,9 @@ export class InventoryService {
   // la fecha más antigua entre los productos ya contados de la tienda —
   // findItemsForStore filtra por producto en memoria contra el propio
   // `updatedAt` de cada uno, en vez de pedir esto producto por producto.
-  private async findUnitsSoldSince(posConfigId: number, sinceDate: Date): Promise<SoldLine[]> {
+  // Las ventas de productos con receta salen ya como consumo de sus
+  // ingredientes (ver RecipesService / expandSale).
+  private async findUnitsSoldSince(posConfigId: number, sinceDate: Date, recipes: RecipeMap): Promise<SoldLine[]> {
     const orders = await fetchAllOdooPages(
       (options) => this.odooService.findPosOrders(options),
       [
@@ -73,11 +78,10 @@ export class InventoryService {
     const soldLines: SoldLine[] = [];
     for (const line of lines) {
       if (!line.product_id || !line.order_id) continue;
-      soldLines.push({
-        productId: line.product_id[0],
-        qty: line.qty,
-        dateOrder: dateOrderByOrderId.get(line.order_id[0]) ?? '',
-      });
+      const dateOrder = dateOrderByOrderId.get(line.order_id[0]) ?? '';
+      for (const sale of expandSale(line.product_id[0], line.qty, recipes)) {
+        soldLines.push({ productId: sale.productId, qty: sale.quantity, dateOrder });
+      }
     }
     return soldLines;
   }
@@ -117,7 +121,7 @@ export class InventoryService {
   // trae TODO el catálogo, sin importar si el producto ya tiene cantidad
   // guardada o no, para que Finanzas vea de una vez qué falta por contar.
   async findItemsForStore(posConfigId: number): Promise<InventoryItemDoc[]> {
-    const [products, savedItems] = await Promise.all([
+    const [products, savedItems, recipes] = await Promise.all([
       fetchAllOdooPages(
         (options) => this.odooService.findProducts(options),
         [],
@@ -125,6 +129,7 @@ export class InventoryService {
         this.logger,
       ),
       this.inventoryRepository.findManyForStore(posConfigId),
+      this.recipesService.findRecipeMap(posConfigId),
     ]);
 
     const savedByProductId = new Map(savedItems.map((item) => [item.productId, item]));
@@ -136,7 +141,7 @@ export class InventoryService {
       ? new Date(Math.min(...savedItems.map((item) => item.updatedAt.getTime())))
       : null;
     const [soldLines, confirmedMovements] = await Promise.all([
-      earliestCountedAt ? this.findUnitsSoldSince(posConfigId, earliestCountedAt) : Promise.resolve([]),
+      earliestCountedAt ? this.findUnitsSoldSince(posConfigId, earliestCountedAt, recipes) : Promise.resolve([]),
       earliestCountedAt
         ? this.inventoryMovementsRepository.findConfirmedSince(posConfigId, earliestCountedAt)
         : Promise.resolve([]),
@@ -157,13 +162,16 @@ export class InventoryService {
     return products
       .map((product): InventoryItemDoc => {
         const saved = savedByProductId.get(product.id);
+        const recipe = recipes.get(product.id);
         return {
           productId: product.id,
           productName: product.display_name,
           categoryName: productCategoryName(product.categ_id),
           unit: isWeightUom(product.uom_id) ? 'kg' : 'unidad',
           quantity: saved ? saved.quantity : null,
-          estimatedQuantity: this.estimateQuantity(saved, soldLinesByProduct, movementsByProduct),
+          // Un producto con receta no lleva existencia: lo que baja son sus ingredientes.
+          estimatedQuantity: recipe ? null : this.estimateQuantity(saved, soldLinesByProduct, movementsByProduct),
+          recipe: recipe ? { components: recipe.components } : null,
           updatedAt: saved ? saved.updatedAt : null,
           updatedByEmail: saved ? saved.updatedByEmail : null,
         };
