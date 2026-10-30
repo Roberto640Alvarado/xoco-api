@@ -8,9 +8,41 @@ const COUNTER_RETRIES = 3;
 export interface StockRequestFilters {
   status?: StockRequestStatus;
   statuses?: StockRequestStatus[];
+  /** Tienda que pide. */
   posConfigId?: number;
+  /** Quién surte: 'plant' = planta; un número = esa tienda. */
+  source?: 'plant' | number;
+  /** La tienda participa como la que pide O como la que surte (vista del Vendedor). */
+  involvingStore?: number;
   createdFrom?: Date;
   createdTo?: Date;
+}
+
+// Las solicitudes anteriores a las solicitudes entre tiendas no traen el
+// campo: "de planta" es null o ausente.
+const FROM_PLANT: Prisma.StoreStockRequestWhereInput = {
+  OR: [{ sourcePosConfigId: null }, { sourcePosConfigId: { isSet: false } }],
+};
+
+function toWhere(filters: StockRequestFilters): Prisma.StoreStockRequestWhereInput {
+  const and: Prisma.StoreStockRequestWhereInput[] = [];
+  if (filters.status) and.push({ status: filters.status });
+  else if (filters.statuses) and.push({ status: { in: filters.statuses } });
+  if (filters.posConfigId !== undefined) and.push({ posConfigId: filters.posConfigId });
+  if (filters.source === 'plant') and.push(FROM_PLANT);
+  else if (filters.source !== undefined) and.push({ sourcePosConfigId: filters.source });
+  if (filters.involvingStore !== undefined) {
+    and.push({ OR: [{ posConfigId: filters.involvingStore }, { sourcePosConfigId: filters.involvingStore }] });
+  }
+  if (filters.createdFrom || filters.createdTo) {
+    and.push({
+      createdAt: {
+        ...(filters.createdFrom ? { gte: filters.createdFrom } : {}),
+        ...(filters.createdTo ? { lte: filters.createdTo } : {}),
+      },
+    });
+  }
+  return and.length ? { AND: and } : {};
 }
 
 export type CreateStockRequestData = Omit<
@@ -68,23 +100,11 @@ export class StockRequestsRepository {
   }
 
   findMany(filters: StockRequestFilters): Promise<StoreStockRequest[]> {
-    const where: Prisma.StoreStockRequestWhereInput = {};
-    if (filters.status) where.status = filters.status;
-    else if (filters.statuses) where.status = { in: filters.statuses };
-    if (filters.posConfigId !== undefined) where.posConfigId = filters.posConfigId;
-    if (filters.createdFrom || filters.createdTo) {
-      where.createdAt = {
-        ...(filters.createdFrom ? { gte: filters.createdFrom } : {}),
-        ...(filters.createdTo ? { lte: filters.createdTo } : {}),
-      };
-    }
-    return this.prisma.storeStockRequest.findMany({ where, orderBy: { createdAt: 'desc' }, take: LIST_LIMIT });
+    return this.prisma.storeStockRequest.findMany({ where: toWhere(filters), orderBy: { createdAt: 'desc' }, take: LIST_LIMIT });
   }
 
-  count(statuses: StockRequestStatus[], posConfigId?: number): Promise<number> {
-    return this.prisma.storeStockRequest.count({
-      where: { status: { in: statuses }, ...(posConfigId === undefined ? {} : { posConfigId }) },
-    });
+  count(filters: StockRequestFilters): Promise<number> {
+    return this.prisma.storeStockRequest.count({ where: toWhere(filters) });
   }
 
   // Guarda un cambio SOLO si nadie más tocó la solicitud desde que se leyó

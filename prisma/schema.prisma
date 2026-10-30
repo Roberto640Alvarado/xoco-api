@@ -212,6 +212,9 @@ enum InventoryMovementType {
   REGALIA
   DEGUSTACION
   ENTRADA
+  // Salida a OTRA tienda por una solicitud entre tiendas: nace CONFIRMADA
+  // cuando la tienda que surte despacha (ver StoreStockRequest.sourcePosConfigId).
+  TRASLADO
 }
 
 // PENDIENTE solo cuando lo registra un VENDEDOR (necesita que Admin o
@@ -382,7 +385,12 @@ model StoreStockRequest {
   id             String              @id @default(auto()) @map("_id") @db.ObjectId
   // Número corrido (SOL-0001), el "Número de Requisición" del formato.
   number         Int                 @unique
+  // Tienda que PIDE (y recibe).
   posConfigId    Int
+  // Quién surte: null = planta (despacho); un id = OTRA tienda (solicitud
+  // entre tiendas). En ese caso los Vendedores de esa tienda responden y
+  // despachan, y al despachar sale de SU inventario (movimiento TRASLADO).
+  sourcePosConfigId Int?
   status         StockRequestStatus
   // Nota general de la tienda al pedir.
   note           String?
@@ -397,6 +405,7 @@ model StoreStockRequest {
   receivedAt     DateTime?
 
   @@index([posConfigId, createdAt])
+  @@index([sourcePosConfigId])
   @@index([status])
   @@map("store_stock_requests")
 }

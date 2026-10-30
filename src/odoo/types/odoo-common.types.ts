@@ -11,6 +11,14 @@ export interface OdooCredentials {
   db: string;
   uid: number;
   apiKey: string;
+  /**
+   * Idioma en que Odoo devuelve los campos traducibles (nombres de
+   * productos, categorías...). Sin esto, la API externa responde en inglés
+   * (en_US) y un producto renombrado en español sale con su nombre viejo
+   * (ej. "Tipo 1" en vez de "I LOVE YOU"). Se usa el idioma del usuario
+   * dueño del API key (ver OdooService.resolveLang).
+   */
+  lang?: string;
 }
 
 export interface OdooSearchReadOptions {

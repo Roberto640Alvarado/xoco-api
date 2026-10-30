@@ -99,9 +99,23 @@ export class InventoryMovementsService {
   // `quantity` y `receivedQuantity` valen lo mismo: lo que de verdad llegó
   // (InventoryService.estimateQuantity usa receivedQuantity ?? quantity).
   async createConfirmedEntries(input: CreateConfirmedEntriesInput): Promise<void> {
+    await this.createConfirmed(InventoryMovementType.ENTRADA, input);
+  }
+
+  // Un TRASLADO ya CONFIRMADO por cada producto que una tienda despacha a
+  // otra (solicitud entre tiendas): resta del inventario de la que envía.
+  async createConfirmedTransfersOut(input: CreateConfirmedEntriesInput): Promise<void> {
+    await this.createConfirmed(InventoryMovementType.TRASLADO, input);
+  }
+
+  private async createConfirmed(
+    type: typeof InventoryMovementType.ENTRADA | typeof InventoryMovementType.TRASLADO,
+    input: CreateConfirmedEntriesInput,
+  ): Promise<void> {
     if (input.entries.length === 0) return;
     await this.repository.createManyConfirmedEntries(
       input.entries.map((entry) => ({
+        type,
         posConfigId: input.posConfigId,
         productId: entry.productId,
         quantity: entry.quantity,
@@ -132,6 +146,9 @@ export class InventoryMovementsService {
   // una solicitud. Esto también frena un movimiento ENTRADA del flujo
   // anterior que haya quedado abierto.
   private assertNotEntry(movement: StoreInventoryMovement): void {
+    if (movement.type === InventoryMovementType.TRASLADO) {
+      throw new BadRequestException('Los traslados entre tiendas se confirman solos al despachar la solicitud.');
+    }
     if (movement.type === InventoryMovementType.ENTRADA) {
       throw new BadRequestException(
         'Las entradas de stock ya no se confirman aquí: llegan con las solicitudes de Inventario → Solicitudes.',

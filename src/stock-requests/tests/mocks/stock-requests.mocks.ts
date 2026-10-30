@@ -58,12 +58,23 @@ export function createOdooMock() {
 export function createAccessMock() {
   const assertEnabledFor = vi.fn().mockResolvedValue(undefined);
   const isEnabledFor = vi.fn().mockResolvedValue(true);
-  return { assertEnabledFor, isEnabledFor, service: { assertEnabledFor, isEnabledFor } as unknown as InventoryAccessService };
+  const findAccess = vi.fn().mockResolvedValue({ enabledPosConfigIds: [RAMBLAS, CENTRO] });
+  return {
+    assertEnabledFor,
+    isEnabledFor,
+    findAccess,
+    service: { assertEnabledFor, isEnabledFor, findAccess } as unknown as InventoryAccessService,
+  };
 }
 
 export function createMovementsMock() {
   const createConfirmedEntries = vi.fn().mockResolvedValue(undefined);
-  return { createConfirmedEntries, service: { createConfirmedEntries } as unknown as InventoryMovementsService };
+  const createConfirmedTransfersOut = vi.fn().mockResolvedValue(undefined);
+  return {
+    createConfirmedEntries,
+    createConfirmedTransfersOut,
+    service: { createConfirmedEntries, createConfirmedTransfersOut } as unknown as InventoryMovementsService,
+  };
 }
 
 // Repositorio en memoria con la misma regla de concurrencia que el real:
@@ -98,18 +109,20 @@ export class FakeStockRequestsRepository {
     return row;
   });
 
-  findMany = vi.fn(async (filters: { status?: StockRequestStatus; posConfigId?: number }) =>
-    this.rows.filter(
-      (row) =>
-        (!filters.status || row.status === filters.status) &&
-        (filters.posConfigId === undefined || row.posConfigId === filters.posConfigId),
-    ),
-  );
+  private matches(row: StoreStockRequest, filters: Record<string, unknown>): boolean {
+    const source = row.sourcePosConfigId ?? null;
+    return (
+      (!filters.status || row.status === filters.status) &&
+      (!filters.statuses || (filters.statuses as StockRequestStatus[]).includes(row.status)) &&
+      (filters.posConfigId === undefined || row.posConfigId === filters.posConfigId) &&
+      (filters.source === undefined || (filters.source === 'plant' ? source === null : source === filters.source)) &&
+      (filters.involvingStore === undefined || row.posConfigId === filters.involvingStore || source === filters.involvingStore)
+    );
+  }
 
-  count = vi.fn(async (statuses: StockRequestStatus[], posConfigId?: number) =>
-    this.rows.filter((row) => statuses.includes(row.status) && (posConfigId === undefined || row.posConfigId === posConfigId))
-      .length,
-  );
+  findMany = vi.fn(async (filters: Record<string, unknown>) => this.rows.filter((row) => this.matches(row, filters)));
+
+  count = vi.fn(async (filters: Record<string, unknown>) => this.rows.filter((row) => this.matches(row, filters)).length);
 
   updateIfUnchanged = vi.fn(async (current: StoreStockRequest, data: Record<string, unknown>) => {
     if (this.failNextUpdate) {

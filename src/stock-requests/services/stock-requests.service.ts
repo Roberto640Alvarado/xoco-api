@@ -5,7 +5,6 @@ import { InventoryAccessService } from '../../inventory/services/inventory-acces
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { isWeightUom } from '../../common/utils/product-uom.util.js';
 import { productCategoryName } from '../../common/utils/product-category.util.js';
-import { assertOwnStoreOrThrow } from '../../common/utils/assert-own-store.util.js';
 import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { Role, StockRequestStatus, StoreStockRequest } from '../../generated/prisma/index.js';
 import { StockRequestsRepository } from '../repositories/stock-requests.repository.js';
@@ -18,6 +17,7 @@ import {
   StockRequestCatalogItemDoc,
   StockRequestDoc,
   StockRequestNotificationsDoc,
+  StockRequestSourceDoc,
 } from '../doc/stock-request.doc.js';
 import {
   OPEN_STATUSES,
@@ -36,11 +36,14 @@ const CATALOG_TTL_MS = 60_000;
 const STORES_TTL_MS = 5 * 60_000;
 const STALE_MESSAGE = 'La solicitud cambió mientras la editabas. Recarga para ver lo último.';
 
-// Solicitudes de stock tienda -> planta -> tienda (ver el modelo
-// StoreStockRequest en schema.prisma para el flujo completo):
+// Solicitudes de stock (ver el modelo StoreStockRequest en schema.prisma):
 //
-//   Tienda pide -> Planta toma, responde (qué sí / qué no / qué agrega) y
-//   despacha -> Tienda confirma lo que llegó -> el stock se suma a la tienda.
+//   Tienda pide -> quien surte toma, responde (qué sí / qué no / qué agrega)
+//   y despacha -> Tienda confirma lo que llegó -> el stock se suma a la tienda.
+//
+// Quien surte es planta (sourcePosConfigId null) u OTRA tienda (solicitud
+// entre tiendas): en ese caso responden los Vendedores de esa tienda y, al
+// despachar, sale de su inventario (TRASLADO).
 //
 // Admin/Finanzas solo ven el seguimiento (y pueden cancelar); actualizar el
 // inventario a mano sigue siendo el Conteo. Aquí vive TODA la lógica de
@@ -144,6 +147,11 @@ export class StockRequestsService {
       code: formatRequestCode(request.number),
       posConfigId: request.posConfigId,
       storeName: storeNames.get(request.posConfigId) ?? `Tienda ${request.posConfigId}`,
+      sourcePosConfigId: request.sourcePosConfigId ?? null,
+      sourceName:
+        request.sourcePosConfigId == null
+          ? 'Planta'
+          : (storeNames.get(request.sourcePosConfigId) ?? `Tienda ${request.sourcePosConfigId}`),
       status: request.status,
       note: request.note,
       createdByEmail: request.createdByEmail,
@@ -177,11 +185,48 @@ export class StockRequestsService {
   // Permisos y utilidades
   // ---------------------------------------------------------------------
 
-  // Una tienda solo toca lo suyo, y solo si Inventario está habilitado
-  // para ella. Planta, Admin y Finanzas ven todas las tiendas.
+  // Un Vendedor solo toca las solicitudes donde su tienda pide o surte, y
+  // solo si tiene Inventario. Planta solo ve las que le piden a planta.
+  // Admin y Finanzas ven todas.
   private async assertCanAccess(user: AuthenticatedUser, request: StoreStockRequest): Promise<void> {
-    assertOwnStoreOrThrow(user, request.posConfigId);
-    await this.accessService.assertEnabledFor(user, request.posConfigId);
+    if (user.role === Role.VENDEDOR) {
+      const own = user.posConfigId;
+      if (own == null || (request.posConfigId !== own && request.sourcePosConfigId !== own)) {
+        throw new ForbiddenException('No tenés acceso a esta tienda.');
+      }
+      await this.accessService.assertEnabledFor(user, own);
+      return;
+    }
+    if (user.role === Role.PLANTA && request.sourcePosConfigId != null) {
+      throw new ForbiddenException('Esta solicitud es entre tiendas: la responde la tienda que surte.');
+    }
+  }
+
+  // ¿Este usuario es quien surte esta solicitud? Planta para las de planta;
+  // un Vendedor de la tienda origen para las de entre tiendas.
+  private isSupplier(user: AuthenticatedUser, request: StoreStockRequest): boolean {
+    if (request.sourcePosConfigId == null) return user.role === Role.PLANTA;
+    return user.role === Role.VENDEDOR && user.posConfigId === request.sourcePosConfigId;
+  }
+
+  private assertSupplier(user: AuthenticatedUser, request: StoreStockRequest): void {
+    if (this.isSupplier(user, request)) return;
+    throw new ForbiddenException(
+      request.sourcePosConfigId == null ? 'Esta solicitud la responde planta.' : 'Esta solicitud la responde la tienda que surte.',
+    );
+  }
+
+  // Una tienda puede surtir a otra solo si es otra tienda real con
+  // Inventario habilitado (sus Vendedores son quienes van a responder).
+  private async assertCanSupply(sourcePosConfigId: number, requesterPosConfigId: number): Promise<void> {
+    if (sourcePosConfigId === requesterPosConfigId) {
+      throw new BadRequestException('No puedes pedirle a la misma tienda que recibe.');
+    }
+    const [storeNames, access] = await Promise.all([this.findStoreNames(), this.accessService.findAccess()]);
+    if (!storeNames.has(sourcePosConfigId)) throw new BadRequestException('La tienda a la que le pides no es válida.');
+    if (!access.enabledPosConfigIds.includes(sourcePosConfigId)) {
+      throw new BadRequestException('Esa tienda todavía no tiene Inventario habilitado: no puede responder solicitudes.');
+    }
   }
 
   private async loadFor(id: string, user: AuthenticatedUser): Promise<StoreStockRequest> {
@@ -218,16 +263,19 @@ export class StockRequestsService {
   // ---------------------------------------------------------------------
 
   async findMany(query: FindStockRequestsQueryDto, user: AuthenticatedUser): Promise<StockRequestDoc[]> {
-    let posConfigId = query.posConfigId;
+    let scope: { posConfigId?: number; involvingStore?: number; source?: 'plant' } = { posConfigId: query.posConfigId };
     if (user.role === Role.VENDEDOR) {
       if (user.posConfigId == null) throw new ForbiddenException('Tu usuario no tiene una tienda asignada.');
       await this.accessService.assertEnabledFor(user, user.posConfigId);
-      posConfigId = user.posConfigId;
+      // Lo que su tienda pidió y lo que otras tiendas le piden.
+      scope = { involvingStore: user.posConfigId };
+    } else if (user.role === Role.PLANTA) {
+      scope = { posConfigId: query.posConfigId, source: 'plant' };
     }
 
     const requests = await this.repository.findMany({
       status: query.status,
-      posConfigId,
+      ...scope,
       createdFrom: query.dateFrom ? new Date(`${query.dateFrom.slice(0, 10)}T00:00:00.000Z`) : undefined,
       createdTo: query.dateTo ? new Date(`${query.dateTo.slice(0, 10)}T23:59:59.999Z`) : undefined,
     });
@@ -242,13 +290,18 @@ export class StockRequestsService {
   // Finanzas no tienen nada "por atender": solo supervisan.
   async findNotifications(user: AuthenticatedUser): Promise<StockRequestNotificationsDoc> {
     if (user.role === Role.PLANTA) {
-      return { pending: await this.repository.count(PLANT_EDITABLE_STATUSES) };
+      return { pending: await this.repository.count({ statuses: PLANT_EDITABLE_STATUSES, source: 'plant' }) };
     }
     if (user.role === Role.VENDEDOR) {
       if (user.posConfigId == null || !(await this.accessService.isEnabledFor(user, user.posConfigId))) {
         return { pending: 0 };
       }
-      return { pending: await this.repository.count([StockRequestStatus.EN_CAMINO], user.posConfigId) };
+      // Envíos por confirmar + lo que otras tiendas le piden y falta responder.
+      const [toReceive, toSupply] = await Promise.all([
+        this.repository.count({ statuses: [StockRequestStatus.EN_CAMINO], posConfigId: user.posConfigId }),
+        this.repository.count({ statuses: PLANT_EDITABLE_STATUSES, source: user.posConfigId }),
+      ]);
+      return { pending: toReceive + toSupply };
     }
     return { pending: 0 };
   }
@@ -272,8 +325,20 @@ export class StockRequestsService {
     return dto.posConfigId;
   }
 
+  // Tiendas a las que se les puede pedir (además de planta): las que tienen
+  // Inventario habilitado, sin la propia del Vendedor.
+  async findSources(user: AuthenticatedUser): Promise<StockRequestSourceDoc[]> {
+    const [storeNames, access] = await Promise.all([this.findStoreNames(), this.accessService.findAccess()]);
+    return access.enabledPosConfigIds
+      .filter((id) => storeNames.has(id) && id !== user.posConfigId)
+      .map((id) => ({ posConfigId: id, name: storeNames.get(id) as string }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }
+
   async create(dto: CreateStockRequestDto, user: AuthenticatedUser): Promise<StockRequestDoc> {
     const posConfigId = await this.resolveRequestStore(dto, user);
+    const sourcePosConfigId = dto.sourcePosConfigId ?? null;
+    if (sourcePosConfigId !== null) await this.assertCanSupply(sourcePosConfigId, posConfigId);
 
     const productIds = dto.lines.map((line) => line.productId);
     if (new Set(productIds).size !== productIds.length) {
@@ -302,6 +367,7 @@ export class StockRequestsService {
     const request = await this.repository.create({
       number: await this.repository.nextNumber(),
       posConfigId,
+      sourcePosConfigId,
       status: StockRequestStatus.SOLICITADA,
       note: dto.note?.trim() || null,
       lines,
@@ -318,6 +384,7 @@ export class StockRequestsService {
   // Planta abre la solicitud para trabajarla: la tienda ve que ya la tomaron.
   async start(id: string, user: AuthenticatedUser): Promise<StockRequestDoc> {
     const request = await this.loadFor(id, user);
+    this.assertSupplier(user, request);
     this.assertStatus(request, [StockRequestStatus.SOLICITADA], 'Esta solicitud ya fue tomada o resuelta.');
     return this.save(request, {
       status: StockRequestStatus.EN_PREPARACION,
@@ -413,6 +480,7 @@ export class StockRequestsService {
   // primera vez, además, toma la solicitud.
   async savePlantResponse(id: string, dto: SavePlantResponseDto, user: AuthenticatedUser): Promise<StockRequestDoc> {
     const request = await this.loadFor(id, user);
+    this.assertSupplier(user, request);
     this.assertStatus(request, PLANT_EDITABLE_STATUSES, 'Esta solicitud ya no se puede modificar.');
     const lines = await this.applyPlantResponse(request, dto);
 
@@ -427,6 +495,7 @@ export class StockRequestsService {
   // que salir. Queda EN_CAMINO y la tienda recibe el aviso.
   async dispatch(id: string, dto: SavePlantResponseDto, user: AuthenticatedUser): Promise<StockRequestDoc> {
     const request = await this.loadFor(id, user);
+    this.assertSupplier(user, request);
     this.assertStatus(request, PLANT_EDITABLE_STATUSES, 'Esta solicitud ya fue despachada o resuelta.');
     const lines = await this.applyPlantResponse(request, dto);
 
@@ -445,12 +514,39 @@ export class StockRequestsService {
     const note = [kind === 'COMPLETO' ? 'Despacho completo' : 'Despacho parcial', dto.note?.trim()]
       .filter(Boolean)
       .join('. ');
-    return this.save(request, {
+    const doc = await this.save(request, {
       status: StockRequestStatus.EN_CAMINO,
       lines: { set: lines },
       dispatchedAt,
       events: { set: [...request.events, { ...this.event(user, StockRequestStatus.EN_CAMINO, note), at: dispatchedAt }] },
     });
+
+    // Entre tiendas: lo que sale se resta YA del inventario de la tienda que
+    // surte (la que recibe lo suma al confirmar, como siempre).
+    if (request.sourcePosConfigId != null) {
+      const sourcePosConfigId = request.sourcePosConfigId;
+      try {
+        await this.movementsService.createConfirmedTransfersOut({
+          posConfigId: sourcePosConfigId,
+          stockRequestId: request.id,
+          note: `Traslado ${formatRequestCode(request.number)} a ${doc.storeName}`,
+          occurredAt: dispatchedAt,
+          entries: lines
+            .filter((line) => (line.sentQuantity ?? 0) > 0)
+            .map((line) => ({ productId: line.productId, quantity: line.sentQuantity as number })),
+          user,
+        });
+      } catch (error) {
+        this.logger.error(
+          `La solicitud ${formatRequestCode(request.number)} quedó EN_CAMINO pero no se pudo restar del inventario de la tienda ${sourcePosConfigId}.`,
+          error instanceof Error ? error.stack : String(error),
+        );
+        throw new ConflictException(
+          'El envío quedó en camino, pero no se pudo restar de tu inventario. Avisa al Admin para que lo ajuste en Conteo.',
+        );
+      }
+    }
+    return doc;
   }
 
   // ---------------------------------------------------------------------
@@ -525,7 +621,14 @@ export class StockRequestsService {
 
   async cancel(id: string, dto: CancelStockRequestDto, user: AuthenticatedUser): Promise<StockRequestDoc> {
     const request = await this.loadFor(id, user);
-    if (!canCancel(user.role, request.status)) {
+    // Entre tiendas, una vez despachada ya salió del inventario de la que
+    // surte: no se cancela, se recibe (y se anota lo que de verdad llegó).
+    if (request.sourcePosConfigId != null && request.status === StockRequestStatus.EN_CAMINO) {
+      throw new BadRequestException('Este envío ya salió de la tienda que surte: que la tienda lo reciba y anote lo que llegó.');
+    }
+    // La tienda que surte cancela con los mismos derechos que planta.
+    const role = user.role === Role.VENDEDOR && this.isSupplier(user, request) ? Role.PLANTA : user.role;
+    if (!canCancel(role, request.status)) {
       throw new BadRequestException(
         OPEN_STATUSES.includes(request.status)
           ? 'En este estado ya no puedes cancelar la solicitud.'

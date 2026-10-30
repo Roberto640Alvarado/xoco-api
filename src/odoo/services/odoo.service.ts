@@ -19,8 +19,14 @@ import {
 // llamada, valida que el API key no esté vencido, y traduce cualquier
 // falla de Odoo (timeout, key vencida/ausente, error de Odoo) a una
 // excepción propia de Nest en vez de dejar pasar el error crudo.
+// El idioma del usuario de Odoo casi nunca cambia: se pregunta una vez por
+// uid y se guarda una hora.
+const LANG_TTL_MS = 60 * 60 * 1000;
+
 @Injectable()
 export class OdooService {
+  private langCache: { uid: number; lang: string | null; expiresAt: number } | null = null;
+
   constructor(
     private readonly odooConfigRepository: OdooConfigRepository,
     private readonly odooRepository: OdooRepository,
@@ -47,7 +53,26 @@ export class OdooService {
       );
     }
 
-    return { baseUrl, db, uid: config.uid, apiKey: config.apiKey };
+    const credentials: OdooCredentials = { baseUrl, db, uid: config.uid, apiKey: config.apiKey };
+    const lang = await this.resolveLang(credentials);
+    return lang ? { ...credentials, lang } : credentials;
+  }
+
+  // Si no se puede leer el idioma, se sigue sin él (inglés) en vez de
+  // tumbar la consulta: los números no cambian, solo los nombres.
+  private async resolveLang(credentials: OdooCredentials): Promise<string | null> {
+    const now = Date.now();
+    if (this.langCache && this.langCache.uid === credentials.uid && this.langCache.expiresAt > now) {
+      return this.langCache.lang;
+    }
+    let lang: string | null = null;
+    try {
+      lang = await this.odooRepository.findUserLang(credentials);
+    } catch {
+      lang = null;
+    }
+    this.langCache = { uid: credentials.uid, lang, expiresAt: now + LANG_TTL_MS };
+    return lang;
   }
 
   private async run<T>(fn: (credentials: OdooCredentials) => Promise<T>): Promise<T> {

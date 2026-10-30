@@ -12,7 +12,8 @@ import { ReceiveStockRequestDto } from '../dto/receive-stock-request.dto.js';
 import { CancelStockRequestDto } from '../dto/cancel-stock-request.dto.js';
 import { FindStockRequestsQueryDto } from '../dto/find-stock-requests-query.dto.js';
 
-// Inventario → Solicitudes: la tienda (o el Admin por ella) pide stock, planta responde y
+// Inventario → Solicitudes: la tienda (o el Admin por ella) pide stock a
+// planta o a otra tienda; quien surte responde y
 // despacha, la tienda confirma lo recibido. Admin/Finanzas solo ven el
 // seguimiento (y cancelan). Cada acción lleva su @Roles propio; lo que
 // depende del estado y de la tienda lo decide StockRequestsService.
@@ -32,6 +33,16 @@ export class StockRequestsController {
   })
   findCatalog() {
     return this.requestsService.findCatalog();
+  }
+
+  @Get('sources')
+  @Roles(Role.SUPER_ADMIN, Role.VENDEDOR)
+  @ApiOperation({
+    summary: 'Tiendas a las que se les puede pedir (además de planta).',
+    description: 'Las que tienen Inventario habilitado, sin la tienda del Vendedor que pide.',
+  })
+  findSources(@User() user: AuthenticatedUser) {
+    return this.requestsService.findSources(user);
   }
 
   @Get('notifications')
@@ -73,7 +84,7 @@ export class StockRequestsController {
   }
 
   @Patch(':id/start')
-  @Roles(Role.PLANTA)
+  @Roles(Role.PLANTA, Role.VENDEDOR)
   @ApiOperation({
     summary: 'Planta toma la solicitud para prepararla.',
     description: 'SOLICITADA -> EN_PREPARACION. La tienda ve que ya la están trabajando.',
@@ -83,7 +94,7 @@ export class StockRequestsController {
   }
 
   @Put(':id/response')
-  @Roles(Role.PLANTA)
+  @Roles(Role.PLANTA, Role.VENDEDOR)
   @ApiOperation({
     summary: 'Planta guarda su avance: qué sí, qué no y qué agrega.',
     description: 'No despacha. Se puede guardar varias veces mientras la solicitud siga en SOLICITADA o EN_PREPARACION.',
@@ -93,11 +104,12 @@ export class StockRequestsController {
   }
 
   @Post(':id/dispatch')
-  @Roles(Role.PLANTA)
+  @Roles(Role.PLANTA, Role.VENDEDOR)
   @ApiOperation({
     summary: 'Planta despacha: el envío va en camino.',
     description:
-      'Guarda la respuesta y pasa a EN_CAMINO (despacho completo o parcial). Toda línea debe estar respondida (0 = no hay) y algo tiene que salir. La tienda recibe el aviso.',
+      'Guarda la respuesta y pasa a EN_CAMINO (despacho completo o parcial). Toda línea debe estar respondida (0 = no hay) y algo tiene que salir. La tienda recibe el aviso. ' +
+      'Planta responde las de planta; en una solicitud entre tiendas, los Vendedores de la tienda que surte, y lo enviado se resta de su inventario (TRASLADO).',
   })
   dispatch(@Param('id') id: string, @Body() dto: SavePlantResponseDto, @User() user: AuthenticatedUser) {
     return this.requestsService.dispatch(id, dto, user);

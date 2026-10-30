@@ -34,6 +34,7 @@ export const KARDEX_CONCEPT: Record<InventoryLedgerEntryType, string> = {
   [InventoryLedgerEntryType.REGALIA]: 'Regalía',
   [InventoryLedgerEntryType.DEGUSTACION]: 'Degustación',
   [InventoryLedgerEntryType.ENTRADA]: 'Entrada',
+  [InventoryLedgerEntryType.TRASLADO]: 'Traslado a otra tienda',
   [InventoryLedgerEntryType.CONTEO]: 'Conteo físico',
 };
 

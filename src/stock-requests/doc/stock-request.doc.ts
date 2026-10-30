@@ -40,8 +40,13 @@ export interface StockRequestDoc {
   number: number;
   /** "SOL-0012": el Número de Requisición del formato. */
   code: string;
+  /** Tienda que pide y recibe. */
   posConfigId: number;
   storeName: string;
+  /** Quién surte: null = planta; un id = otra tienda (solicitud entre tiendas). */
+  sourcePosConfigId: number | null;
+  /** "Planta" o el nombre de la tienda que surte. */
+  sourceName: string;
   status: StockRequestStatus;
   /** Nota general de la tienda al pedir. */
   note: string | null;
@@ -65,6 +70,12 @@ export interface StockRequestCatalogItemDoc {
   productName: string;
   categoryName: string;
   unit: 'unidad' | 'kg';
+}
+
+/** Tienda a la que se le puede pedir (GET /inventory/requests/sources). */
+export interface StockRequestSourceDoc {
+  posConfigId: number;
+  name: string;
 }
 
 /** GET /inventory/requests/notifications — el globo del menú. */

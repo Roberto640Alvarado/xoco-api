@@ -477,4 +477,64 @@ describe('StockRequestsService', () => {
       expect(ctx.odoo.findProducts).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('entre tiendas', () => {
+    // Ramblas le pide a Centro.
+    async function createTransfer(): Promise<StockRequestDoc> {
+      return ctx.service.create(
+        { sourcePosConfigId: CENTRO, lines: [{ productId: 100, quantity: 5 }, { productId: 200, quantity: 2 }] },
+        USERS.tienda,
+      );
+    }
+
+    it('la tienda pide a otra tienda; queda con su origen y Planta no la ve', async () => {
+      const doc = await createTransfer();
+      expect(doc).toMatchObject({ posConfigId: RAMBLAS, sourcePosConfigId: CENTRO, sourceName: 'Tienda Centro' });
+      expect(await ctx.service.findMany({}, USERS.planta)).toEqual([]);
+      await expect(ctx.service.findOne(doc.id, USERS.planta)).rejects.toBeInstanceOf(ForbiddenException);
+      expect((await ctx.service.findMany({}, USERS.otraTienda)).map((item) => item.id)).toEqual([doc.id]);
+    });
+
+    it('no se puede pedir a la misma tienda ni a una sin Inventario', async () => {
+      await expect(ctx.service.create({ sourcePosConfigId: RAMBLAS, lines: [{ productId: 100, quantity: 1 }] }, USERS.tienda)).rejects.toThrow(
+        'misma tienda',
+      );
+      ctx.access.findAccess.mockResolvedValueOnce({ enabledPosConfigIds: [RAMBLAS] });
+      await expect(ctx.service.create({ sourcePosConfigId: CENTRO, lines: [{ productId: 100, quantity: 1 }] }, USERS.tienda)).rejects.toThrow(
+        'no tiene Inventario',
+      );
+    });
+
+    it('responde y despacha la tienda que surte (no planta ni la que pide), y sale de su inventario', async () => {
+      const doc = await createTransfer();
+      const response = { lines: [{ productId: 100, sentQuantity: 5 }, { productId: 200, sentQuantity: 0, note: 'No hay' }] };
+      await expect(ctx.service.dispatch(doc.id, response, USERS.planta)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(ctx.service.dispatch(doc.id, response, USERS.tienda)).rejects.toThrow('tienda que surte');
+
+      const sent = await ctx.service.dispatch(doc.id, response, USERS.otraTienda);
+      expect(sent.status).toBe(StockRequestStatus.EN_CAMINO);
+      expect(ctx.movements.createConfirmedTransfersOut).toHaveBeenCalledWith(
+        expect.objectContaining({ posConfigId: CENTRO, entries: [{ productId: 100, quantity: 5 }] }),
+      );
+
+      const received = await ctx.service.receive(doc.id, { lines: [{ productId: 100, receivedQuantity: 5 }] }, USERS.tienda);
+      expect(received.status).toBe(StockRequestStatus.RECIBIDA);
+      expect(ctx.movements.createConfirmedEntries).toHaveBeenCalledWith(expect.objectContaining({ posConfigId: RAMBLAS }));
+    });
+
+    it('avisos: la que surte ve lo que le piden; ya despachada no se cancela', async () => {
+      const doc = await createTransfer();
+      expect(await ctx.service.findNotifications(USERS.otraTienda)).toEqual({ pending: 1 });
+      expect(await ctx.service.findNotifications(USERS.planta)).toEqual({ pending: 0 });
+      await ctx.service.dispatch(doc.id, { lines: [{ productId: 100, sentQuantity: 5 }, { productId: 200, sentQuantity: 2 }] }, USERS.otraTienda);
+      expect(await ctx.service.findNotifications(USERS.tienda)).toEqual({ pending: 1 });
+      await expect(ctx.service.cancel(doc.id, { reason: 'x' }, USERS.admin)).rejects.toThrow('ya salió');
+    });
+
+    it('la tienda que surte puede cancelar mientras la prepara', async () => {
+      const doc = await createTransfer();
+      const cancelled = await ctx.service.cancel(doc.id, { reason: 'No tenemos' }, USERS.otraTienda);
+      expect(cancelled.status).toBe(StockRequestStatus.CANCELADA);
+    });
+  });
 });

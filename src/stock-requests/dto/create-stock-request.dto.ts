@@ -41,7 +41,18 @@ export class CreateStockRequestDto {
   @Min(1)
   posConfigId?: number;
 
-  @ApiPropertyOptional({ description: 'Nota general para planta (ej. "urgente para el fin de semana").' })
+  @ApiPropertyOptional({
+    example: 4,
+    nullable: true,
+    description:
+      'A quién se le pide: vacío/null = planta; el id de OTRA tienda = solicitud entre tiendas (esa tienda responde, despacha y se le descuenta de su inventario).',
+  })
+  @IsOptional()
+  @IsInt({ message: 'La tienda de origen debe ser un número entero.' })
+  @Min(1)
+  sourcePosConfigId?: number | null;
+
+  @ApiPropertyOptional({ description: 'Nota general para quien surte (ej. "urgente para el fin de semana").' })
   @IsOptional()
   @IsString()
   @MaxLength(500)

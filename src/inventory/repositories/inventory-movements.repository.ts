@@ -18,7 +18,17 @@ export interface CreateMovementData {
   registeredByRole: Role;
 }
 
+// Movimientos que el usuario registra a mano (los que pasan por la bandeja
+// de Admin/Finanzas). ENTRADA y TRASLADO nacen solos con las solicitudes.
+const MANUAL_TYPES: InventoryMovementType[] = [
+  InventoryMovementType.MERMA,
+  InventoryMovementType.REGALIA,
+  InventoryMovementType.DEGUSTACION,
+];
+
 export interface CreateConfirmedEntryData {
+  /** ENTRADA (llega a la tienda) o TRASLADO (sale hacia otra tienda). */
+  type: typeof InventoryMovementType.ENTRADA | typeof InventoryMovementType.TRASLADO;
   posConfigId: number;
   productId: number;
   quantity: number;
@@ -77,7 +87,7 @@ export class InventoryMovementsRepository {
   // más recientes primero — la bandeja de Admin/Finanzas.
   findOpen(statuses: InventoryMovementStatus[]): Promise<StoreInventoryMovement[]> {
     return this.prisma.storeInventoryMovement.findMany({
-      where: { status: { in: statuses }, type: { not: InventoryMovementType.ENTRADA } },
+      where: { status: { in: statuses }, type: { in: MANUAL_TYPES } },
       orderBy: { occurredAt: 'desc' },
     });
   }
@@ -86,7 +96,7 @@ export class InventoryMovementsRepository {
   // confirme, en todas las tiendas.
   countPending(): Promise<number> {
     return this.prisma.storeInventoryMovement.count({
-      where: { status: InventoryMovementStatus.PENDIENTE, type: { not: InventoryMovementType.ENTRADA } },
+      where: { status: InventoryMovementStatus.PENDIENTE, type: { in: MANUAL_TYPES } },
     });
   }
 
@@ -97,7 +107,7 @@ export class InventoryMovementsRepository {
       where: {
         posConfigId,
         registeredByEmail,
-        type: { not: InventoryMovementType.ENTRADA },
+        type: { in: MANUAL_TYPES },
         status: { in: [InventoryMovementStatus.CONFIRMADO, InventoryMovementStatus.RECHAZADO] },
         resolvedAt: { gt: since },
       },
@@ -130,9 +140,10 @@ export class InventoryMovementsRepository {
       data: entries.map((entry) => ({
         posConfigId: entry.posConfigId,
         productId: entry.productId,
-        type: InventoryMovementType.ENTRADA,
+        type: entry.type,
         quantity: entry.quantity,
-        receivedQuantity: entry.quantity,
+        // Solo la ENTRADA lleva "lo que llegó"; en un TRASLADO es lo que salió.
+        receivedQuantity: entry.type === InventoryMovementType.ENTRADA ? entry.quantity : null,
         note: entry.note,
         occurredAt: entry.occurredAt,
         status: InventoryMovementStatus.CONFIRMADO,

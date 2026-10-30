@@ -4,6 +4,7 @@ export enum InventoryLedgerEntryType {
   REGALIA = 'REGALIA',
   DEGUSTACION = 'DEGUSTACION',
   ENTRADA = 'ENTRADA',
+  TRASLADO = 'TRASLADO',
   CONTEO = 'CONTEO',
 }
 

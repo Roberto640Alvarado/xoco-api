@@ -54,7 +54,12 @@ export class OdooRepository {
     args: unknown[],
     kwargs: Record<string, unknown> = {},
   ): Promise<T> {
-    const { baseUrl, db, uid, apiKey } = credentials;
+    const { baseUrl, db, uid, apiKey, lang } = credentials;
+    // Todo en el idioma del usuario (ver OdooCredentials.lang); un contexto
+    // que mande quien llama (ej. active_test) se respeta.
+    if (lang) {
+      kwargs = { ...kwargs, context: { lang, ...((kwargs.context as Record<string, unknown> | undefined) ?? {}) } };
+    }
 
     let response;
     try {
@@ -89,6 +94,18 @@ export class OdooRepository {
   private toSearchReadArgs(options: OdooSearchReadOptions = {}) {
     const { domain = [], ...kwargs } = options;
     return { args: [domain], kwargs };
+  }
+
+  // Idioma del usuario dueño del API key (res.users.lang), ej. "es_MX".
+  async findUserLang(credentials: OdooCredentials): Promise<string | null> {
+    const users = await this.executeKw<{ lang: string | false }[]>(
+      { ...credentials, lang: undefined },
+      'res.users',
+      'read',
+      [[credentials.uid]],
+      { fields: ['lang'] },
+    );
+    return users[0]?.lang || null;
   }
 
   findProducts(credentials: OdooCredentials, options?: OdooSearchReadOptions) {
