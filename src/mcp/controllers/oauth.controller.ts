@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Logger, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Logger, Post, Query, Res } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator.js';
@@ -24,12 +24,27 @@ function pickAuthorizeParams(source: Record<string, unknown>): Record<string, st
   return params;
 }
 
-function sendOAuthError(res: Response, error: unknown) {
+function sendOAuthError(res: Response, error: unknown, logger: Logger, context: string) {
   if (error instanceof OAuthError) {
+    logger.warn(`OAuth ${context} rechazado: ${error.error} — ${error.description}`);
     res.status(error.status).json({ error: error.error, error_description: error.description });
     return;
   }
+  logger.error(`OAuth ${context} falló`, error instanceof Error ? error.stack : String(error));
   throw error;
+}
+
+// Algunos clientes mandan client_id (y client_secret) en "Authorization: Basic"
+// en vez de en el cuerpo: se pasa al cuerpo para tratarlos igual.
+function withBasicClient(body: Record<string, unknown>, authorization: string | undefined): Record<string, unknown> {
+  if (!authorization?.startsWith('Basic ') || body.client_id !== undefined) return body;
+  try {
+    const decoded = Buffer.from(authorization.slice(6), 'base64').toString('utf8');
+    const clientId = decodeURIComponent(decoded.split(':')[0] ?? '');
+    return clientId ? { ...body, client_id: clientId } : body;
+  } catch {
+    return body;
+  }
 }
 
 // Endpoints OAuth del conector MCP: registro dinámico, página de inicio de
@@ -47,9 +62,11 @@ export class OAuthController {
   @Post('register')
   async register(@Body() body: Record<string, unknown>, @Res() res: Response) {
     try {
-      res.status(201).json(await this.oauthService.registerClient(body ?? {}));
+      const client = await this.oauthService.registerClient(body ?? {});
+      this.logger.log(`OAuth: cliente registrado "${client.client_name ?? 'sin nombre'}" -> ${client.redirect_uris.join(', ')}`);
+      res.status(201).json(client);
     } catch (error) {
-      sendOAuthError(res, error);
+      sendOAuthError(res, error, this.logger, 'registro');
     }
   }
 
@@ -61,6 +78,7 @@ export class OAuthController {
       res.status(200).type('html').send(renderLoginPage({ clientName, params }));
     } catch (error) {
       if (error instanceof OAuthError) {
+        this.logger.warn(`OAuth authorize rechazado: ${error.description}`);
         res.status(400).type('html').send(renderErrorPage(error.description));
         return;
       }
@@ -101,12 +119,15 @@ export class OAuthController {
   }
 
   @Post('token')
-  async token(@Body() body: Record<string, unknown>, @Res() res: Response) {
+  async token(@Body() body: Record<string, unknown>, @Headers('authorization') authorization: string | undefined, @Res() res: Response) {
     res.setHeader('Cache-Control', 'no-store');
+    const request = withBasicClient(body ?? {}, authorization);
     try {
-      res.status(200).json(await this.oauthService.token(body ?? {}));
+      const tokens = await this.oauthService.token(request);
+      this.logger.log(`OAuth token emitido (${String(request.grant_type)}).`);
+      res.status(200).json(tokens);
     } catch (error) {
-      sendOAuthError(res, error);
+      sendOAuthError(res, error, this.logger, `token (${String(request.grant_type)}, campos: ${Object.keys(request).join(',')})`);
     }
   }
 }

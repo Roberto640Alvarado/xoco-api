@@ -35,6 +35,7 @@ export class McpController {
       user = await this.oauthService.verifyAccessToken(token);
     } catch (error) {
       const description = error instanceof OAuthError ? error.description : 'No autorizado.';
+      this.logger.warn(`MCP ${req.method} sin acceso: ${description}`);
       res
         .status(401)
         .setHeader('WWW-Authenticate', `${challenge}, error="invalid_token", error_description="${description.replace(/"/g, "'")}"`)
@@ -44,6 +45,7 @@ export class McpController {
 
     // Sin estado: no hay stream de notificaciones (GET) ni sesiones que cerrar (DELETE).
     if (req.method !== 'POST') {
+      this.logger.log(`MCP ${req.method} -> 405 (servidor sin estado).`);
       res.status(405).setHeader('Allow', 'POST').json({ jsonrpc: '2.0', error: { code: -32000, message: 'Método no permitido.' }, id: null });
       return;
     }
@@ -54,6 +56,8 @@ export class McpController {
       void transport.close();
       void server.close();
     });
+    const rpc = req.body as { method?: string } | undefined;
+    this.logger.log(`MCP ${rpc?.method ?? 'POST'} de ${user.email}`);
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);

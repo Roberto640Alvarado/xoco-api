@@ -147,7 +147,9 @@ export class OAuthService {
     if (!stored || stored.usedAt || stored.expiresAt.getTime() < Date.now()) {
       throw new OAuthError('invalid_grant', 'El código no es válido o ya venció.');
     }
-    if (body.client_id !== stored.clientId) throw new OAuthError('invalid_grant', 'El código es de otro cliente.');
+    if (body.client_id !== undefined && body.client_id !== stored.clientId) {
+      throw new OAuthError('invalid_grant', 'El código es de otro cliente.');
+    }
     if (body.redirect_uri !== undefined && body.redirect_uri !== stored.redirectUri) {
       throw new OAuthError('invalid_grant', 'La redirect_uri no coincide.');
     }
