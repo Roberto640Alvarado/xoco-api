@@ -142,16 +142,15 @@ export class InventoryMovementsService {
     return Promise.all(movements.map((movement) => this.toDoc(movement, namesByProductId.get(movement.productId))));
   }
 
-  // Las entradas ya no se confirman a mano: nacen confirmadas al recibir
-  // una solicitud. Esto también frena un movimiento ENTRADA del flujo
-  // anterior que haya quedado abierto.
+  // TRASLADO y la ENTRADA de una solicitud nacen confirmados; no pasan por
+  // la bandeja. La ENTRADA manual (sin solicitud) sí se confirma aquí.
   private assertNotEntry(movement: StoreInventoryMovement): void {
     if (movement.type === InventoryMovementType.TRASLADO) {
       throw new BadRequestException('Los traslados entre tiendas se confirman solos al despachar la solicitud.');
     }
-    if (movement.type === InventoryMovementType.ENTRADA) {
+    if (movement.type === InventoryMovementType.ENTRADA && movement.stockRequestId) {
       throw new BadRequestException(
-        'Las entradas de stock ya no se confirman aquí: llegan con las solicitudes de Inventario → Solicitudes.',
+        'Esta entrada llegó con una solicitud y ya quedó confirmada al recibirla.',
       );
     }
   }

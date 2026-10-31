@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import {
   InventoryMovementStatus,
   InventoryMovementType,
+  Prisma,
   Role,
   StoreInventoryMovement,
 } from '../../generated/prisma/index.js';
@@ -19,12 +20,23 @@ export interface CreateMovementData {
 }
 
 // Movimientos que el usuario registra a mano (los que pasan por la bandeja
-// de Admin/Finanzas). ENTRADA y TRASLADO nacen solos con las solicitudes.
+// de Admin/Finanzas): las salidas y la ENTRADA manual (sin solicitud).
+// TRASLADO y las ENTRADA de una solicitud nacen solos y no pasan por aquí.
 const MANUAL_TYPES: InventoryMovementType[] = [
   InventoryMovementType.MERMA,
   InventoryMovementType.REGALIA,
   InventoryMovementType.DEGUSTACION,
 ];
+
+const MANUAL_WHERE = {
+  OR: [
+    { type: { in: MANUAL_TYPES } },
+    {
+      type: InventoryMovementType.ENTRADA,
+      OR: [{ stockRequestId: null }, { stockRequestId: { isSet: false } }],
+    },
+  ],
+} satisfies Prisma.StoreInventoryMovementWhereInput;
 
 export interface CreateConfirmedEntryData {
   /** ENTRADA (llega a la tienda) o TRASLADO (sale hacia otra tienda). */
@@ -87,7 +99,7 @@ export class InventoryMovementsRepository {
   // más recientes primero — la bandeja de Admin/Finanzas.
   findOpen(statuses: InventoryMovementStatus[]): Promise<StoreInventoryMovement[]> {
     return this.prisma.storeInventoryMovement.findMany({
-      where: { status: { in: statuses }, type: { in: MANUAL_TYPES } },
+      where: { status: { in: statuses }, ...MANUAL_WHERE },
       orderBy: { occurredAt: 'desc' },
     });
   }
@@ -96,7 +108,7 @@ export class InventoryMovementsRepository {
   // confirme, en todas las tiendas.
   countPending(): Promise<number> {
     return this.prisma.storeInventoryMovement.count({
-      where: { status: InventoryMovementStatus.PENDIENTE, type: { in: MANUAL_TYPES } },
+      where: { status: InventoryMovementStatus.PENDIENTE, ...MANUAL_WHERE },
     });
   }
 
@@ -107,7 +119,7 @@ export class InventoryMovementsRepository {
       where: {
         posConfigId,
         registeredByEmail,
-        type: { in: MANUAL_TYPES },
+        ...MANUAL_WHERE,
         status: { in: [InventoryMovementStatus.CONFIRMADO, InventoryMovementStatus.RECHAZADO] },
         resolvedAt: { gt: since },
       },
