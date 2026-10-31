@@ -1,6 +1,9 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
+import { XocoApiCatalogService } from './mcp/services/xoco-api-catalog.service.js';
 
 // La app (xoco-app) llama a esta API desde el navegador (axios
 // client-side) — al vivir en otro puerto es otro origin, así que sin CORS
@@ -11,7 +14,10 @@ import { AppModule } from './app.module.js';
 const DEFAULT_ORIGINS = ['http://localhost:3000', 'http://localhost:3010'];
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Detrás del proxy de hosting: respeta X-Forwarded-Proto/Host (URLs https
+  // correctas en los metadatos OAuth del conector MCP).
+  app.set('trust proxy', true);
 
   const configuredOrigins = process.env.CORS_ORIGIN?.split(',')
     .map((origin) => origin.trim())
@@ -26,6 +32,11 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+  // El conector MCP lista y valida los GET de la API a partir del documento
+  // OpenAPI (los decoradores de Swagger de cada controller).
+  const openApi = SwaggerModule.createDocument(app, new DocumentBuilder().setTitle('Xocolatísimo API').build());
+  app.get(XocoApiCatalogService).setDocument(openApi);
+
   await app.listen(process.env.PORT ?? 4005);
 }
 await bootstrap();

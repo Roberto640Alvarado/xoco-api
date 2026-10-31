@@ -15,6 +15,7 @@ import { InventoryModule } from './inventory/inventory.module.js';
 import { StockRequestsModule } from './stock-requests/stock-requests.module.js';
 import { PermissionsModule } from './permissions/permissions.module.js';
 import { RecipesModule } from './recipes/recipes.module.js';
+import { McpModule } from './mcp/mcp.module.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { RolesGuard } from './common/guards/roles.guard.js';
 import { ModuleAccessGuard } from './common/guards/module-access.guard.js';
@@ -33,7 +34,7 @@ import { ModuleAccessGuard } from './common/guards/module-access.guard.js';
 // las credenciales reales (idealmente desde variables de entorno, no
 // hardcodeadas), y pasar `instrument: ObserveInstrument` en main.ts.
 @Module({
-  imports: [PrismaModule, UsersModule, AuthModule, OdooModule, SalesModule, GoalsModule, SalesGoalsModule, TicketGoalsModule, WholesaleGoalsModule, InventoryModule, StockRequestsModule, PermissionsModule, RecipesModule],
+  imports: [PrismaModule, UsersModule, AuthModule, OdooModule, SalesModule, GoalsModule, SalesGoalsModule, TicketGoalsModule, WholesaleGoalsModule, InventoryModule, StockRequestsModule, PermissionsModule, RecipesModule, McpModule],
   controllers: [AppController],
   providers: [
     AppService,

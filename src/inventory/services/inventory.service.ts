@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { OdooService } from '../../odoo/services/odoo.service.js';
 import { fetchAllOdooPages } from '../../common/utils/odoo-pagination.util.js';
 import { isWeightUom } from '../../common/utils/product-uom.util.js';
@@ -22,6 +22,30 @@ interface SoldLine {
   // nunca se parsea a Date, porque así ordena igual que Odoo sin
   // depender de que el runtime entienda el formato naive.
   dateOrder: string;
+}
+
+// El conteo físico vale desde la hora en que se CONTÓ (countedAt), no desde
+// que se guardó; los conteos anteriores a ese campo usan updatedAt.
+export function countedAtOf(item: StoreInventoryItem): Date {
+  return item.countedAt ?? item.updatedAt;
+}
+
+const MAX_COUNT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const FUTURE_TOLERANCE_MS = 2 * 60 * 1000;
+
+// Hora del conteo que manda el cliente: ahora si no viene; nunca futura ni
+// de hace más de 7 días (un error de fecha movería todo el estimado).
+function resolveCountedAt(value: string | undefined): Date {
+  if (!value) return new Date();
+  const countedAt = new Date(value);
+  const now = Date.now();
+  if (countedAt.getTime() > now + FUTURE_TOLERANCE_MS) {
+    throw new BadRequestException('La hora del conteo no puede ser en el futuro.');
+  }
+  if (countedAt.getTime() < now - MAX_COUNT_AGE_MS) {
+    throw new BadRequestException('La hora del conteo no puede ser de hace más de 7 días.');
+  }
+  return countedAt;
 }
 
 // Primer tramo del módulo Inventario (ver plan-history): inventario
@@ -101,12 +125,13 @@ export class InventoryService {
     movementsByProduct: Map<number, StoreInventoryMovement[]>,
   ): number | null {
     if (!saved) return null;
-    const sinceThisCount = toOdooDateTime(saved.updatedAt.getTime());
+    const countedAt = countedAtOf(saved);
+    const sinceThisCount = toOdooDateTime(countedAt.getTime());
     const soldSinceThisCount = (soldLinesByProduct.get(saved.productId) ?? [])
       .filter((line) => line.dateOrder >= sinceThisCount)
       .reduce((sum, line) => sum + line.qty, 0);
     const movedSinceThisCount = (movementsByProduct.get(saved.productId) ?? [])
-      .filter((movement) => movement.occurredAt >= saved.updatedAt)
+      .filter((movement) => movement.occurredAt >= countedAt)
       .reduce((sum, movement) => {
         const amount = movement.receivedQuantity ?? movement.quantity;
         return movement.type === InventoryMovementType.ENTRADA ? sum - amount : sum + amount;
@@ -138,7 +163,7 @@ export class InventoryService {
     // tienda — cada producto filtra de ahí lo que le corresponde según
     // su propio `updatedAt` en estimateQuantity.
     const earliestCountedAt = savedItems.length
-      ? new Date(Math.min(...savedItems.map((item) => item.updatedAt.getTime())))
+      ? new Date(Math.min(...savedItems.map((item) => countedAtOf(item).getTime())))
       : null;
     const [soldLines, confirmedMovements] = await Promise.all([
       earliestCountedAt ? this.findUnitsSoldSince(posConfigId, earliestCountedAt, recipes) : Promise.resolve([]),
@@ -172,6 +197,7 @@ export class InventoryService {
           // Un producto con receta no lleva existencia: lo que baja son sus ingredientes.
           estimatedQuantity: recipe ? null : this.estimateQuantity(saved, soldLinesByProduct, movementsByProduct),
           recipe: recipe ? { components: recipe.components } : null,
+          countedAt: saved ? countedAtOf(saved) : null,
           updatedAt: saved ? saved.updatedAt : null,
           updatedByEmail: saved ? saved.updatedByEmail : null,
         };
@@ -184,6 +210,7 @@ export class InventoryService {
     dto: UpsertInventoryBulkDto,
     updatedByEmail: string,
   ): Promise<InventorySavedItemDoc[]> {
+    const countedAt = resolveCountedAt(dto.countedAt);
     // Cantidad que había guardada justo antes — para el historial de
     // conteos (Registro de entradas y salidas).
     const previous = new Map(
@@ -194,6 +221,7 @@ export class InventoryService {
         posConfigId,
         productId: entry.productId,
         quantity: entry.quantity,
+        countedAt,
         updatedByEmail,
       })),
     );
@@ -205,6 +233,7 @@ export class InventoryService {
         quantity: entry.quantity,
         previousQuantity: previous.get(entry.productId) ?? null,
         countedByEmail: updatedByEmail,
+        countedAt,
       })),
     );
 

@@ -7,12 +7,14 @@ export interface CreateCountLogData {
   quantity: number;
   previousQuantity: number | null;
   countedByEmail: string;
+  countedAt: Date;
 }
 
 export interface UpsertInventoryItemData {
   posConfigId: number;
   productId: number;
   quantity: number;
+  countedAt: Date;
   updatedByEmail: string;
 }
 
@@ -37,7 +39,7 @@ export class InventoryRepository {
           productId: data.productId,
         },
       },
-      update: { quantity: data.quantity, updatedByEmail: data.updatedByEmail },
+      update: { quantity: data.quantity, countedAt: data.countedAt, updatedByEmail: data.updatedByEmail },
       create: data,
     });
   }

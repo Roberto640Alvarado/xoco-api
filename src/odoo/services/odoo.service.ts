@@ -136,4 +136,21 @@ export class OdooService {
   readGroupPosPayments(options: OdooReadGroupOptions) {
     return this.run((credentials) => this.odooRepository.readGroupPosPayments(credentials, options));
   }
+
+  // Consultas genéricas de solo lectura (conector MCP de Admin/Finanzas).
+  searchReadModel(model: string, options: OdooSearchReadOptions & { fields?: string[] }) {
+    return this.run((credentials) => this.odooRepository.searchReadModel(credentials, model, options));
+  }
+
+  searchCountModel(model: string, domain?: unknown[]) {
+    return this.run((credentials) => this.odooRepository.searchCountModel(credentials, model, domain));
+  }
+
+  readGroupModel(model: string, options: OdooReadGroupOptions & { limit?: number; offset?: number }) {
+    return this.run((credentials) => this.odooRepository.readGroupModel(credentials, model, options));
+  }
+
+  fieldsGetModel(model: string) {
+    return this.run((credentials) => this.odooRepository.fieldsGetModel(credentials, model));
+  }
 }

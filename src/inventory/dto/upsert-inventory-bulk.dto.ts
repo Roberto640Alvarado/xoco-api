@@ -1,6 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, IsNumber, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsDateString, IsInt, IsNumber, IsOptional, Min, ValidateNested } from 'class-validator';
 
 class InventoryItemEntryDto {
   @ApiProperty({ description: 'id de product.product en Odoo, tal como lo devuelve GET .../items.' })
@@ -28,4 +28,14 @@ export class UpsertInventoryBulkDto {
   @ValidateNested({ each: true })
   @Type(() => InventoryItemEntryDto)
   entries: InventoryItemEntryDto[];
+
+  @ApiPropertyOptional({
+    example: '2026-10-30T13:00:00.000Z',
+    description:
+      'Cuándo se hizo el conteo físico (ISO). Las ventas y movimientos desde esa hora se restan/suman al conteo. ' +
+      'Sin valor = ahora. No puede ser futuro ni de hace más de 7 días.',
+  })
+  @IsOptional()
+  @IsDateString({}, { message: 'La hora del conteo no es válida.' })
+  countedAt?: string;
 }

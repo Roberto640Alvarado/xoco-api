@@ -13,6 +13,7 @@ import { InventoryKardexDoc, InventoryKardexProductDoc } from '../doc/inventory-
 import { InventoryLedgerEntryType } from '../doc/inventory-ledger.doc.js';
 import { KardexEvent, buildProductKardex } from '../utils/kardex.util.js';
 import { RecipesService } from '../../recipes/services/recipes.service.js';
+import { countedAtOf } from './inventory.service.js';
 
 // "2026-10-11 15:04:31" (UTC naive) -> Date.
 function fromOdooDateTime(odooDateTime: string): Date {
@@ -79,15 +80,16 @@ export class InventoryKardexService {
       });
     }
     for (const item of items) {
-      if (item.updatedAt.getTime() > to.getTime()) continue;
+      const itemCountedAt = countedAtOf(item);
+      if (itemCountedAt.getTime() > to.getTime()) continue;
       const logged = (events.get(item.productId) ?? []).some(
-        (event) => Math.abs(event.at.getTime() - item.updatedAt.getTime()) <= SAME_COUNT_TOLERANCE_MS,
+        (event) => Math.abs(event.at.getTime() - itemCountedAt.getTime()) <= SAME_COUNT_TOLERANCE_MS,
       );
       if (logged) continue;
       push(item.productId, {
         direction: 'COUNT',
         type: InventoryLedgerEntryType.CONTEO,
-        at: item.updatedAt,
+        at: itemCountedAt,
         quantity: item.quantity,
         reference: null,
         registeredBy: item.updatedByEmail,

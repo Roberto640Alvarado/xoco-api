@@ -26,6 +26,8 @@ export interface InventoryItemDoc {
    * (estimatedQuantity null). null = producto normal.
    */
   recipe: { components: { productId: number; productName: string; quantity: number }[] } | null;
+  /** Cuándo se contó físicamente (desde ahí se restan las ventas). */
+  countedAt: Date | null;
   updatedAt: Date | null;
   updatedByEmail: string | null;
 }

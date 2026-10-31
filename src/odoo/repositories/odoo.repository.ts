@@ -96,6 +96,41 @@ export class OdooRepository {
     return { args: [domain], kwargs };
   }
 
+  // ---------------------------------------------------------------------
+  // Consultas genéricas de SOLO LECTURA sobre cualquier modelo (las usa el
+  // conector MCP de Admin/Finanzas). Solo métodos que no escriben nada.
+  // ---------------------------------------------------------------------
+
+  searchReadModel(credentials: OdooCredentials, model: string, options: OdooSearchReadOptions & { fields?: string[] }) {
+    const { domain = [], fields, ...kwargs } = options;
+    return this.executeKw<Record<string, unknown>[]>(credentials, model, 'search_read', [domain], {
+      ...(fields?.length ? { fields } : {}),
+      ...kwargs,
+    });
+  }
+
+  searchCountModel(credentials: OdooCredentials, model: string, domain: unknown[] = []) {
+    return this.executeKw<number>(credentials, model, 'search_count', [domain]);
+  }
+
+  readGroupModel(
+    credentials: OdooCredentials,
+    model: string,
+    options: OdooReadGroupOptions & { limit?: number; offset?: number },
+  ) {
+    const { domain = [], fields, groupby, ...kwargs } = options;
+    return this.executeKw<Record<string, unknown>[]>(credentials, model, 'read_group', [domain, fields, groupby], {
+      lazy: false,
+      ...kwargs,
+    });
+  }
+
+  fieldsGetModel(credentials: OdooCredentials, model: string) {
+    return this.executeKw<Record<string, Record<string, unknown>>>(credentials, model, 'fields_get', [], {
+      attributes: ['string', 'type', 'relation', 'help', 'selection', 'store'],
+    });
+  }
+
   // Idioma del usuario dueño del API key (res.users.lang), ej. "es_MX".
   async findUserLang(credentials: OdooCredentials): Promise<string | null> {
     const users = await this.executeKw<{ lang: string | false }[]>(

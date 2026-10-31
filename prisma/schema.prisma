@@ -190,6 +190,11 @@ model StoreInventoryItem {
   posConfigId    Int
   productId      Int
   quantity       Float
+  // Cuándo se CONTÓ físicamente (puede ser antes de guardarlo en el panel:
+  // se cuenta antes de abrir y se captura más tarde). La existencia
+  // estimada resta las ventas desde esta hora. null en conteos anteriores a
+  // este campo: se usa updatedAt.
+  countedAt      DateTime?
   updatedAt      DateTime @updatedAt
   updatedByEmail String?
 
@@ -458,3 +463,52 @@ model StoreRecipe {
   @@map("store_recipes")
 }
 
+
+// ---------------------------------------------------------------------------
+// Conector MCP (Claude / ChatGPT) para Admin y Finanzas — OAuth 2.1
+//
+// Claude.ai y ChatGPT se registran solos como cliente (registro dinámico),
+// mandan a la persona a nuestra página de inicio de sesión y reciben un
+// código que cambian por un token. Solo entra SUPER_ADMIN o FINANZAS (ver
+// OAuthService). Los códigos y tokens se guardan HASHEADOS (sha256): un
+// respaldo de la base no sirve para entrar.
+// ---------------------------------------------------------------------------
+model OAuthClient {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId     String   @unique
+  clientName   String?
+  redirectUris String[]
+  createdAt    DateTime @default(now())
+
+  @@map("oauth_clients")
+}
+
+model OAuthAuthCode {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  codeHash      String    @unique
+  clientId      String
+  userId        String    @db.ObjectId
+  redirectUri   String
+  // PKCE (S256) — obligatorio.
+  codeChallenge String
+  resource      String?
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@map("oauth_auth_codes")
+}
+
+model OAuthRefreshToken {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  tokenHash String    @unique
+  clientId  String
+  userId    String    @db.ObjectId
+  expiresAt DateTime
+  // Se rota en cada uso: el usado queda revocado.
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("oauth_refresh_tokens")
+}
