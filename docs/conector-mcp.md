@@ -1,6 +1,6 @@
 # Conector MCP de Xocolatísimo (Claude y ChatGPT)
 
-Permite que **solo el Super admin** pregunte en Claude o ChatGPT por cualquier dato del panel (xoco-api) y de Odoo. **Solo lectura**: no puede modificar nada.
+Permite que **Super admin y Finanzas** pregunten en Claude o ChatGPT por cualquier dato del panel (xoco-api) y de Odoo. **Solo lectura**: no puede modificar nada.
 
 ## Qué necesita la API publicada
 

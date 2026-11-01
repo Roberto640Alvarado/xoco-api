@@ -43,7 +43,7 @@ export function renderLoginPage({ clientName, params, email = '', error }: Login
   <div class="brand"><span class="dot" aria-hidden="true"></span>XOCOLATÍSIMO</div>
   <h1>Conectar ${escapeHtml(clientName)}</h1>
   <p>${escapeHtml(clientName)} podrá <strong>consultar</strong> los datos del panel y de Odoo con tu usuario. No podrá modificar nada.</p>
-  <ul><li>Solo para usuarios Super admin. Solo consulta: no puede cambiar nada.</li><li>Puedes desconectarlo cuando quieras desde ${escapeHtml(clientName)}.</li></ul>
+  <ul><li>Solo para usuarios Super admin y Finanzas. Solo consulta: no puede cambiar nada.</li><li>Puedes desconectarlo cuando quieras desde ${escapeHtml(clientName)}.</li></ul>
   <form method="post" action="/oauth/authorize">
     ${hidden}
     <label for="email">Correo</label>

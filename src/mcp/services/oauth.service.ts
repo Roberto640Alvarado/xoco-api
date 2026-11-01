@@ -5,8 +5,8 @@ import { UsersService } from '../../users/services/users.service.js';
 import { OAuthRepository } from '../repositories/oauth.repository.js';
 import { isAllowedRedirectUri, randomToken, sha256Hex, verifyPkceS256 } from '../utils/oauth-crypto.util.js';
 
-/** Quién puede usar el conector: solo Super admin. */
-export const MCP_ALLOWED_ROLES: Role[] = [Role.SUPER_ADMIN];
+/** Quién puede usar el conector: Super admin y Finanzas. */
+export const MCP_ALLOWED_ROLES: Role[] = [Role.SUPER_ADMIN, Role.FINANZAS];
 
 const CODE_TTL_MS = 5 * 60 * 1000;
 const ACCESS_TOKEN_TTL_S = 60 * 60;
@@ -106,14 +106,14 @@ export class OAuthService {
     return { clientName: client.clientName || 'Asistente de IA' };
   }
 
-  /** Correo y contraseña del panel; solo Super admin activos. */
+  /** Correo y contraseña del panel; solo Super admin o Finanzas activos. */
   async authenticate(email: string, password: string): Promise<User> {
     const user = await this.usersService.findByEmail(email ?? '');
     const valid = user && (await this.usersService.validatePassword(password ?? '', user.password));
     if (!user || !valid) throw new OAuthError('access_denied', 'Correo o contraseña incorrectos.', 401);
     if (!user.isActive) throw new OAuthError('access_denied', 'Tu cuenta está desactivada.', 403);
     if (!MCP_ALLOWED_ROLES.includes(user.role)) {
-      throw new OAuthError('access_denied', 'Solo los usuarios Super admin pueden conectar este acceso.', 403);
+      throw new OAuthError('access_denied', 'Solo los usuarios Super admin y Finanzas pueden conectar este acceso.', 403);
     }
     return user;
   }

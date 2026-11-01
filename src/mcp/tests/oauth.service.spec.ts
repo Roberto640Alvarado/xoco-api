@@ -95,9 +95,9 @@ describe('OAuthService', () => {
     expect(user.email).toBe('admin@xoco.com');
   });
 
-  it('solo Super admin puede conectar (Finanzas tampoco); contraseña mala no entra', async () => {
-    await expect(ctx.service.authenticate('tienda@xoco.com', 'ok')).rejects.toThrow('Solo los usuarios Super admin');
-    await expect(ctx.service.authenticate('fin@xoco.com', 'ok')).rejects.toThrow('Solo los usuarios Super admin');
+  it('solo Super admin y Finanzas pueden conectar; contraseña mala no entra', async () => {
+    await expect(ctx.service.authenticate('tienda@xoco.com', 'ok')).rejects.toThrow('Super admin y Finanzas');
+    await expect(ctx.service.authenticate('fin@xoco.com', 'ok')).resolves.toMatchObject({ email: 'fin@xoco.com' });
     await expect(ctx.service.authenticate('admin@xoco.com', 'mala')).rejects.toThrow('incorrectos');
   });
 

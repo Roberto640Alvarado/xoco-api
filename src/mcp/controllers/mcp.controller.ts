@@ -9,8 +9,8 @@ import { publicBaseUrl } from '../utils/public-url.util.js';
 
 // Endpoint MCP (Streamable HTTP, sin estado) para Claude.ai y ChatGPT.
 // @Public() porque NO usa el JWT del panel: valida su propio token OAuth
-// (OAuthService.verifyAccessToken), que solo emite para Super admin
-// activos. Sin token responde 401 con la dirección de los
+// (OAuthService.verifyAccessToken), que solo emite para Super admin y
+// Finanzas activos. Sin token responde 401 con la dirección de los
 // metadatos para que el cliente arranque el inicio de sesión.
 @ApiExcludeController()
 @Public()

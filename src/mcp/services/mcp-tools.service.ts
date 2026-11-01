@@ -28,7 +28,7 @@ const STORE_DATE = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/El_Salv
 // El Salvador (ayer, esta semana, este mes...).
 function instructions(): string {
   const today = STORE_DATE.format(new Date());
-  return `Conector de Xocolatísimo ("Xoco"), chocolatería en El Salvador. SOLO LECTURA y solo para Super admin.
+  return `Conector de Xocolatísimo ("Xoco"), chocolatería en El Salvador. SOLO LECTURA, para Super admin y Finanzas.
 
 Úsalo siempre que el usuario mencione Xoco, Xocolatísimo, Xocolatisimo, Xocolatisimo SV, "la chocolatería", sus tiendas (CENTRIKA, San Benito, Sucursal Escalón, Tienda Ramblas), Planta, ventas, metas, inventario, kardex, solicitudes de stock, recetas o datos de Odoo del negocio.
 
