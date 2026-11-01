@@ -35,8 +35,16 @@ function instructions(): string {
 Hoy en El Salvador es ${today} (UTC-6). Interpreta "hoy", "ayer", "esta semana" o "este mes" con esa fecha.
 
 Empieza por las herramientas directas (mismas cifras que el panel):
-- xoco_tiendas, xoco_ventas_por_dia, xoco_ventas_por_tienda, xoco_productos_mas_vendidos, xoco_metas_del_mes
+- xoco_tiendas, xoco_venta_mensual, xoco_ventas_por_tienda, xoco_ventas_por_dia, xoco_productos_mas_vendidos, xoco_metas_del_mes
 - xoco_inventario_tienda, xoco_kardex
+
+CIFRA OFICIAL DE VENTAS (muy importante, para que todas las respuestas coincidan):
+- La venta y las visitas OFICIALES de una tienda son las de "Venta Mensual / Visitas" del panel: xoco_venta_mensual (por mes) o xoco_ventas_por_tienda (un rango). Cuentan FACTURAS, netas de notas de crédito, atribuidas a la tienda por diario y vendedor; el mayoreo va aparte. Es la cifra que ve Finanzas y la base de las metas.
+- xoco_ventas_por_dia es la venta de CAJA (órdenes del POS por día). Sirve para tendencia diaria, días de la semana y ticket promedio, pero NO es la cifra oficial: puede diferir de la oficial (otra fuente, otra fecha y otra forma de asignar la tienda).
+- Nunca mezcles las dos fuentes en un mismo resumen o tabla. Para totales, meses, crecimiento, comparaciones entre tiendas y avance contra metas usa SIEMPRE la oficial.
+- Di siempre de qué reporte sale cada cifra (ej. "Venta Mensual del panel").
+- Si comparas una tienda, da contexto con las demás tiendas en el mismo período.
+- Antes de recomendar productos, revisa qué vende de verdad la tienda (xoco_productos_mas_vendidos).
 Para lo demás del panel: xoco_endpoints + xoco_get.
 Para detalle que el panel no cubre, Odoo: odoo_models, odoo_fields, odoo_search_read, odoo_count, odoo_read_group.
 
@@ -60,6 +68,26 @@ function failure(message: string) {
 }
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato YYYY-MM-DD.');
+
+const MAX_MONTHS = 24;
+
+/** Meses YYYY-MM de `from` a `to`, incluidos. */
+export function monthRange(from: string, to: string): string[] {
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  const months: string[] = [];
+  for (let y = fy, m = fm; y < ty || (y === ty && m <= tm); m === 12 ? ((m = 1), y++) : m++) {
+    months.push(`${y}-${String(m).padStart(2, '0')}`);
+    if (months.length > MAX_MONTHS) break;
+  }
+  return months;
+}
+
+function lastDayOfMonth(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  const day = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${month}-${String(day).padStart(2, '0')}`;
+}
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
@@ -160,9 +188,9 @@ export class McpToolsService {
     server.registerTool(
       'xoco_ventas_por_dia',
       {
-        title: 'Ventas de Xoco por día',
+        title: 'Venta de caja de Xoco por día',
         description:
-          'Venta de caja (POS) de Xocolatísimo por día local: monto y órdenes, sin canceladas. Una tienda o todas. Igual que la gráfica del panel.',
+          'Venta de CAJA (órdenes del POS) de Xocolatísimo por día local, sin canceladas. Para tendencia diaria y ticket promedio. NO es la cifra oficial de venta: para totales por mes o por tienda usa xoco_venta_mensual o xoco_ventas_por_tienda.',
         inputSchema: { ...rangeSchema, tienda: storeId.optional().describe('Sin valor = todas las tiendas.') },
         annotations: READ_ONLY,
       },
@@ -173,13 +201,64 @@ export class McpToolsService {
     server.registerTool(
       'xoco_ventas_por_tienda',
       {
-        title: 'Ventas y visitas de Xoco por tienda',
+        title: 'Venta oficial y visitas de Xoco por tienda',
         description:
-          'Visitas (facturas) y venta con y sin impuesto por tienda de Xocolatísimo; mayoreo aparte. Es la cifra de los módulos Visitas y Venta Mensual del panel.',
+          'CIFRA OFICIAL: visitas (facturas) y venta con y sin impuesto por tienda de Xocolatísimo en un rango; mayoreo aparte. Es la de los módulos Visitas y Venta Mensual del panel. Para varios meses usa xoco_venta_mensual.',
         inputSchema: rangeSchema,
         annotations: READ_ONLY,
       },
       async ({ desde, hasta }) => this.panelTool(user, '/sales/by-store', { dateFrom: desde, dateTo: hasta ?? desde }),
+    );
+
+    server.registerTool(
+      'xoco_venta_mensual',
+      {
+        title: 'Venta Mensual oficial de Xoco, mes por mes',
+        description:
+          'CIFRA OFICIAL mes por mes (la de Venta Mensual / Visitas del panel): por cada mes, venta con y sin impuesto y visitas de cada tienda de Xocolatísimo, total de tiendas y mayoreo aparte. Úsala para tendencias, crecimiento y comparaciones. Un mes en curso llega hasta hoy.',
+        inputSchema: {
+          desdeMes: z.string().regex(/^\d{4}-\d{2}$/, 'Formato YYYY-MM.').describe('Primer mes, YYYY-MM.'),
+          hastaMes: z.string().regex(/^\d{4}-\d{2}$/, 'Formato YYYY-MM.').optional().describe('Último mes, YYYY-MM. Si se omite, solo desdeMes.'),
+          tienda: storeId.optional().describe('Solo esta tienda (sin valor = todas).'),
+        },
+        annotations: READ_ONLY,
+      },
+      async ({ desdeMes, hastaMes, tienda }) => {
+        const months = monthRange(desdeMes, hastaMes ?? desdeMes);
+        if (months.length === 0) return failure('El rango de meses no es válido (desdeMes debe ser antes que hastaMes).');
+        if (months.length > MAX_MONTHS) return failure(`Pide como máximo ${MAX_MONTHS} meses por consulta.`);
+        const today = STORE_DATE.format(new Date());
+        const results = await Promise.all(
+          months.map(async (month) => {
+            const from = `${month}-01`;
+            const lastDay = lastDayOfMonth(month);
+            const to = lastDay > today ? today : lastDay;
+            if (from > today) return { mes: month, nota: 'Mes futuro: sin datos.' };
+            const result = await this.panel(user, '/sales/by-store', { dateFrom: from, dateTo: to });
+            if ('error' in result) return { mes: month, error: result.error };
+            const data = result.data as {
+              items?: Array<{ posConfigId: number; storeName: string; visits: number; amountUntaxed: number; amountTotal: number }>;
+              totals?: unknown;
+              outsideStores?: unknown;
+            };
+            const items = (data.items ?? []).filter((item) => tienda === undefined || item.posConfigId === tienda);
+            return {
+              mes: month,
+              hasta: to,
+              tiendas: items.map((item) => ({
+                tienda: item.storeName,
+                posConfigId: item.posConfigId,
+                visitas: item.visits,
+                ventaSinImpuesto: item.amountUntaxed,
+                ventaConImpuesto: item.amountTotal,
+                ticketPromedio: item.visits ? Math.round((item.amountTotal / item.visits) * 100) / 100 : null,
+              })),
+              ...(tienda === undefined ? { totalTiendas: data.totals, mayoreo: data.outsideStores } : {}),
+            };
+          }),
+        );
+        return text({ fuente: 'Venta Mensual / Visitas del panel (facturas, cifra oficial)', meses: results });
+      },
     );
 
     server.registerTool(

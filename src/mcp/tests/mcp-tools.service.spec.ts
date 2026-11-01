@@ -5,7 +5,7 @@ import type { OpenAPIObject } from '@nestjs/swagger';
 import { Role, User } from '../../generated/prisma/index.js';
 import type { OdooService } from '../../odoo/services/odoo.service.js';
 import type { OAuthService } from '../services/oauth.service.js';
-import { McpToolsService } from '../services/mcp-tools.service.js';
+import { McpToolsService, monthRange } from '../services/mcp-tools.service.js';
 import { XocoApiCatalogService } from '../services/xoco-api-catalog.service.js';
 
 const USER = { id: 'a1', email: 'admin@xoco.com', name: 'Admin', role: Role.SUPER_ADMIN } as User;
@@ -73,6 +73,7 @@ describe('McpToolsService', () => {
         'xoco_metas_del_mes',
         'xoco_productos_mas_vendidos',
         'xoco_tiendas',
+        'xoco_venta_mensual',
         'xoco_ventas_por_dia',
         'xoco_ventas_por_tienda',
       ].sort(),
@@ -85,6 +86,19 @@ describe('McpToolsService', () => {
     expect(client.getServerVersion()?.title).toBe('Xocolatísimo (Xoco)');
     expect(client.getInstructions()).toMatch(/Xoco, Xocolatísimo, Xocolatisimo/);
     expect(client.getInstructions()).toMatch(/SOLO LECTURA/);
+  });
+
+  it('xoco_venta_mensual pide la cifra oficial mes por mes', async () => {
+    const ctx = setup();
+    const client = await connect(ctx.service);
+    await client.callTool({ name: 'xoco_venta_mensual', arguments: { desdeMes: '2026-05', hastaMes: '2026-06' } });
+    expect(ctx.get).toHaveBeenCalledWith('/sales/by-store', { dateFrom: '2026-05-01', dateTo: '2026-05-31' }, 'panel-token');
+    expect(ctx.get).toHaveBeenCalledWith('/sales/by-store', { dateFrom: '2026-06-01', dateTo: '2026-06-30' }, 'panel-token');
+  });
+
+  it('monthRange cruza de año', () => {
+    expect(monthRange('2026-11', '2027-02')).toEqual(['2026-11', '2026-12', '2027-01', '2027-02']);
+    expect(monthRange('2026-05', '2026-04')).toEqual([]);
   });
 
   it('xoco_ventas_por_dia usa el endpoint del panel con el rango y la tienda', async () => {
