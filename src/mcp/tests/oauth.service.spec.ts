@@ -87,16 +87,17 @@ describe('OAuthService', () => {
     ctx = setup();
   });
 
-  it('flujo completo: registro, login de Finanzas, código con PKCE, token y uso en /mcp', async () => {
-    const { client, verifier, code } = await authorize(ctx.service, 'fin@xoco.com');
+  it('flujo completo: registro, login de Super admin, código con PKCE, token y uso en /mcp', async () => {
+    const { client, verifier, code } = await authorize(ctx.service, 'admin@xoco.com');
     const tokens = await ctx.service.token({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: client.client_id, redirect_uri: REDIRECT });
     expect(tokens.token_type).toBe('Bearer');
     const user = await ctx.service.verifyAccessToken(tokens.access_token);
-    expect(user.email).toBe('fin@xoco.com');
+    expect(user.email).toBe('admin@xoco.com');
   });
 
-  it('solo Super admin y Finanzas pueden conectar; contraseña mala no entra', async () => {
-    await expect(ctx.service.authenticate('tienda@xoco.com', 'ok')).rejects.toThrow('Super admin y Finanzas');
+  it('solo Super admin puede conectar (Finanzas tampoco); contraseña mala no entra', async () => {
+    await expect(ctx.service.authenticate('tienda@xoco.com', 'ok')).rejects.toThrow('Solo los usuarios Super admin');
+    await expect(ctx.service.authenticate('fin@xoco.com', 'ok')).rejects.toThrow('Solo los usuarios Super admin');
     await expect(ctx.service.authenticate('admin@xoco.com', 'mala')).rejects.toThrow('incorrectos');
   });
 

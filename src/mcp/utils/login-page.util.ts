@@ -38,12 +38,12 @@ export function renderLoginPage({ clientName, params, email = '', error }: Login
     .join('');
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Conectar con Xocolatísimo</title><style>${STYLE}</style></head>
+<title>Conectar con Xocolatísimo</title><link rel="icon" href="/favicon.ico"><style>${STYLE}</style></head>
 <body><main>
   <div class="brand"><span class="dot" aria-hidden="true"></span>XOCOLATÍSIMO</div>
   <h1>Conectar ${escapeHtml(clientName)}</h1>
   <p>${escapeHtml(clientName)} podrá <strong>consultar</strong> los datos del panel y de Odoo con tu usuario. No podrá modificar nada.</p>
-  <ul><li>Solo para usuarios Super admin y Finanzas.</li><li>Puedes desconectarlo cuando quieras desde ${escapeHtml(clientName)}.</li></ul>
+  <ul><li>Solo para usuarios Super admin. Solo consulta: no puede cambiar nada.</li><li>Puedes desconectarlo cuando quieras desde ${escapeHtml(clientName)}.</li></ul>
   <form method="post" action="/oauth/authorize">
     ${hidden}
     <label for="email">Correo</label>

@@ -59,9 +59,39 @@ describe('McpToolsService', () => {
     const client = await connect(setup().service);
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual(
-      ['odoo_count', 'odoo_fields', 'odoo_models', 'odoo_read_group', 'odoo_search_read', 'whoami', 'xoco_endpoints', 'xoco_get'].sort(),
+      [
+        'odoo_count',
+        'odoo_fields',
+        'odoo_models',
+        'odoo_read_group',
+        'odoo_search_read',
+        'whoami',
+        'xoco_endpoints',
+        'xoco_get',
+        'xoco_inventario_tienda',
+        'xoco_kardex',
+        'xoco_metas_del_mes',
+        'xoco_productos_mas_vendidos',
+        'xoco_tiendas',
+        'xoco_ventas_por_dia',
+        'xoco_ventas_por_tienda',
+      ].sort(),
     );
     expect(tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
+  });
+
+  it('se presenta como Xocolatísimo (Xoco) con su ícono e instrucciones', async () => {
+    const client = await connect(setup().service);
+    expect(client.getServerVersion()?.title).toBe('Xocolatísimo (Xoco)');
+    expect(client.getInstructions()).toMatch(/Xoco, Xocolatísimo, Xocolatisimo/);
+    expect(client.getInstructions()).toMatch(/SOLO LECTURA/);
+  });
+
+  it('xoco_ventas_por_dia usa el endpoint del panel con el rango y la tienda', async () => {
+    const ctx = setup();
+    const client = await connect(ctx.service);
+    await client.callTool({ name: 'xoco_ventas_por_dia', arguments: { desde: '2026-10-01', hasta: '2026-10-31', tienda: 1 } });
+    expect(ctx.get).toHaveBeenCalledWith('/sales/daily-summary', { dateFrom: '2026-10-01', dateTo: '2026-10-31', posConfigId: 1 }, 'panel-token');
   });
 
   it('el catálogo de xoco-api oculta login y la config del API key de Odoo', async () => {

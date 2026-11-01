@@ -1,6 +1,6 @@
 # Conector MCP de Xocolatísimo (Claude y ChatGPT)
 
-Permite que **Super admin y Finanzas** pregunten en Claude o ChatGPT por cualquier dato del panel (xoco-api) y de Odoo. **Solo lectura**: no puede modificar nada.
+Permite que **solo el Super admin** pregunte en Claude o ChatGPT por cualquier dato del panel (xoco-api) y de Odoo. **Solo lectura**: no puede modificar nada.
 
 ## Qué necesita la API publicada
 
@@ -41,3 +41,9 @@ Ejemplos de preguntas: "¿Cuánto vendió Centrika ayer por método de pago?", "
 - `xoco_get` solo permite GET a rutas conocidas y usa un token del panel de la persona (mismos permisos que en pantalla). No expone login ni la configuración del API key de Odoo.
 - Odoo se consulta con el API key configurado (usuario de Odoo de ese key), sin métodos de escritura; se bloquean modelos de credenciales/configuración técnica y adjuntos.
 - Para desconectar: quitar el conector en Claude/ChatGPT. Para cortar el acceso de alguien: desactivarlo o cambiarle el rol en Usuarios.
+
+## Herramientas directas (v1.1)
+`xoco_tiendas`, `xoco_ventas_por_dia`, `xoco_ventas_por_tienda`, `xoco_productos_mas_vendidos`, `xoco_metas_del_mes`, `xoco_inventario_tienda`, `xoco_kardex`. El asistente las usa cuando se menciona Xoco o Xocolatísimo. Las genéricas (`xoco_get`, `odoo_*`) siguen para lo demás.
+
+## Ícono
+La API sirve `/favicon.ico` e `/icon.png`, y el servidor MCP anuncia su ícono. Claude puede tardar en actualizar el ícono de un conector ya agregado: si sigue saliendo el de Railway, quita el conector y vuelve a agregarlo. Con un dominio propio (ej. `api.xocolatisimo.com.sv`) el ícono deja de depender de railway.app.
