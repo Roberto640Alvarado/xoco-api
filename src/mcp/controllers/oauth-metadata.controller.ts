@@ -1,4 +1,4 @@
-import { Controller, Get, Req } from '@nestjs/common';
+import { Controller, Get, Header, Req } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator.js';
@@ -11,7 +11,10 @@ import { publicBaseUrl } from '../utils/public-url.util.js';
 @Public()
 @Controller('.well-known')
 export class OAuthMetadataController {
+  // Metadatos públicos: se pueden leer desde cualquier origen (el panel
+  // los usa para mostrar si el conector está en línea, también en local).
   @Get(['oauth-protected-resource', 'oauth-protected-resource/mcp'])
+  @Header('Access-Control-Allow-Origin', '*')
   protectedResource(@Req() req: Request) {
     const base = publicBaseUrl(req);
     return {
@@ -24,6 +27,7 @@ export class OAuthMetadataController {
   }
 
   @Get(['oauth-authorization-server', 'oauth-authorization-server/mcp', 'openid-configuration'])
+  @Header('Access-Control-Allow-Origin', '*')
   authorizationServer(@Req() req: Request) {
     const base = publicBaseUrl(req);
     return {

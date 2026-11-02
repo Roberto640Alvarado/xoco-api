@@ -11,6 +11,7 @@ import { SavePlantResponseDto } from '../dto/save-plant-response.dto.js';
 import { ReceiveStockRequestDto } from '../dto/receive-stock-request.dto.js';
 import { CancelStockRequestDto } from '../dto/cancel-stock-request.dto.js';
 import { FindStockRequestsQueryDto } from '../dto/find-stock-requests-query.dto.js';
+import { StockRequestsSummaryService } from '../services/stock-requests-summary.service.js';
 
 // Inventario → Solicitudes: la tienda (o el Admin por ella) pide stock a
 // planta o a otra tienda; quien surte responde y
@@ -23,7 +24,19 @@ import { FindStockRequestsQueryDto } from '../dto/find-stock-requests-query.dto.
 @RequiresModule('dashboard.inventario-solicitudes')
 @Controller('inventory/requests')
 export class StockRequestsController {
-  constructor(private readonly requestsService: StockRequestsService) {}
+  constructor(
+    private readonly requestsService: StockRequestsService,
+    private readonly summaryService: StockRequestsSummaryService,
+  ) {}
+
+  @Get('summary')
+  @Roles(Role.PLANTA, Role.SUPER_ADMIN, Role.FINANZAS)
+  @ApiOperation({
+    summary: 'Resumen de pedidos a planta para el Inicio: hoy, por responder, en camino, por tienda y por día (14 días).',
+  })
+  summary() {
+    return this.summaryService.summary();
+  }
 
   @Get('catalog')
   @Roles(Role.SUPER_ADMIN, Role.VENDEDOR, Role.PLANTA)

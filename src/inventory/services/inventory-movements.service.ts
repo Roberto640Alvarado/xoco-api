@@ -136,6 +136,21 @@ export class InventoryMovementsService {
 
   // Bandeja de Admin/Finanzas: merma/regalía/degustación PENDIENTES de
   // TODAS las tiendas.
+  /**
+   * Movimientos para la campana de notificaciones: Admin/Finanzas, los
+   * pendientes de confirmar de todas las tiendas; el Vendedor, lo suyo que
+   * ya le confirmaron o rechazaron desde `since` (por defecto 7 días).
+   */
+  async findNotificationItems(user: AuthenticatedUser, since?: Date): Promise<InventoryMovementDoc[]> {
+    if (user.role === Role.SUPER_ADMIN || user.role === Role.FINANZAS) return this.findInbox();
+    if (user.role !== Role.VENDEDOR || user.posConfigId == null) return [];
+    if (!(await this.accessService.isEnabledFor(user, user.posConfigId))) return [];
+    const from = since ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const movements = await this.repository.findResolvedSince(user.posConfigId, user.email, from);
+    const namesByProductId = await this.findProductNames(movements.map((movement) => movement.productId));
+    return Promise.all(movements.map((movement) => this.toDoc(movement, namesByProductId.get(movement.productId))));
+  }
+
   async findInbox(): Promise<InventoryMovementDoc[]> {
     const movements = await this.repository.findOpen([InventoryMovementStatus.PENDIENTE]);
     const namesByProductId = await this.findProductNames(movements.map((movement) => movement.productId));

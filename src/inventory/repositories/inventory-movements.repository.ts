@@ -126,6 +126,21 @@ export class InventoryMovementsRepository {
     });
   }
 
+  /** Lo que el Vendedor reportó y ya le resolvieron después de `since` (para sus notificaciones). */
+  findResolvedSince(posConfigId: number, registeredByEmail: string, since: Date): Promise<StoreInventoryMovement[]> {
+    return this.prisma.storeInventoryMovement.findMany({
+      where: {
+        posConfigId,
+        registeredByEmail,
+        ...MANUAL_WHERE,
+        status: { in: [InventoryMovementStatus.CONFIRMADO, InventoryMovementStatus.RECHAZADO] },
+        resolvedAt: { gt: since },
+      },
+      orderBy: { resolvedAt: 'desc' },
+      take: 50,
+    });
+  }
+
   async findByIdOrThrow(id: string): Promise<StoreInventoryMovement> {
     const movement = await this.prisma.storeInventoryMovement.findUnique({ where: { id } });
     if (!movement) throw new NotFoundException('Movimiento no encontrado.');

@@ -19,6 +19,8 @@ import { FindTopProductsByCategoryQueryDto } from '../dto/find-top-products-by-c
 import { FindDailySummaryQueryDto } from '../dto/find-daily-summary-query.dto.js';
 import { FindReconciliationQueryDto } from '../dto/find-reconciliation-query.dto.js';
 import { FindInvoiceRangeQueryDto } from '../dto/find-invoice-range-query.dto.js';
+import { FindTodaySalesQueryDto } from '../dto/find-today-sales-query.dto.js';
+import { TodaySalesService } from '../services/today-sales.service.js';
 
 // SUPER_ADMIN y FINANZAS pueden ambos acceder a Ventas (ver CLAUDE.md,
 // "Autorización": FINANZAS solo puede acceder a ventas/reportes/finanzas).
@@ -33,6 +35,7 @@ export class SalesController {
     private readonly storeInvoiceTotalsService: StoreInvoiceTotalsService,
     private readonly wholesaleClientTotalsService: WholesaleClientTotalsService,
     private readonly customerSearchService: CustomerSearchService,
+    private readonly todaySalesService: TodaySalesService,
   ) {}
 
   // Solo Admin y Finanzas (hereda el @Roles de la clase) y con la pantalla de
@@ -118,6 +121,17 @@ export class SalesController {
   findTopProductsByCategory(@Query() query: FindTopProductsByCategoryQueryDto, @User() user: AuthenticatedUser) {
     query.posConfigId = scopedPosConfigId(user, query.posConfigId);
     return this.salesService.findTopProductsByCategory(query);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)
+  @RequiresModule('dashboard.resumen')
+  @Get('today')
+  @ApiOperation({
+    summary: 'Ventas de hoy (Inicio): lo que va del día por tienda y por hora, contra el mismo día de la semana pasada a la misma hora.',
+    description: 'Venta de caja (POS), sin canceladas, en hora de El Salvador. El Vendedor solo ve su tienda.',
+  })
+  findToday(@Query() query: FindTodaySalesQueryDto, @User() user: AuthenticatedUser) {
+    return this.todaySalesService.findToday(scopedPosConfigId(user, query.posConfigId));
   }
 
   @Roles(Role.SUPER_ADMIN, Role.FINANZAS, Role.VENDEDOR)

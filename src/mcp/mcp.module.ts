@@ -18,6 +18,6 @@ import { OAuthRepository } from './repositories/oauth.repository.js';
   imports: [UsersModule, OdooModule, JwtModule.register({})],
   controllers: [OAuthMetadataController, OAuthController, McpController, BrandIconController],
   providers: [OAuthService, OAuthRepository, McpToolsService, XocoApiCatalogService],
-  exports: [XocoApiCatalogService],
+  exports: [XocoApiCatalogService, McpToolsService],
 })
 export class McpModule {}

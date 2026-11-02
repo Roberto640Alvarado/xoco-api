@@ -3,7 +3,7 @@ import type { OpenAPIObject } from '@nestjs/swagger';
 
 // Rutas que el conector NUNCA consulta, aunque sean GET: sesión/login,
 // el propio OAuth/MCP y la configuración del API key de Odoo.
-const BLOCKED_PREFIXES = ['/auth', '/oauth', '/mcp', '/.well-known', '/odoo/config'];
+const BLOCKED_PREFIXES = ['/auth', '/oauth', '/mcp', '/.well-known', '/odoo/config', '/ai-chat'];
 
 const MAX_BODY_CHARS = 120_000;
 

@@ -288,6 +288,26 @@ export class StockRequestsService {
 
   // El globo del menú: lo que ESTE usuario tiene que atender. Admin y
   // Finanzas no tienen nada "por atender": solo supervisan.
+  /**
+   * Solicitudes para la campana de notificaciones (las mismas que cuenta
+   * findNotifications): Planta, las de planta por responder o despachar; el
+   * Vendedor, sus envíos en camino y lo que otras tiendas le piden.
+   */
+  async findNotificationItems(user: AuthenticatedUser): Promise<StockRequestDoc[]> {
+    if (user.role === Role.PLANTA) {
+      return this.toDocs(await this.repository.findMany({ statuses: PLANT_EDITABLE_STATUSES, source: 'plant' }));
+    }
+    if (user.role === Role.VENDEDOR) {
+      if (user.posConfigId == null || !(await this.accessService.isEnabledFor(user, user.posConfigId))) return [];
+      const [toReceive, toSupply] = await Promise.all([
+        this.repository.findMany({ statuses: [StockRequestStatus.EN_CAMINO], posConfigId: user.posConfigId }),
+        this.repository.findMany({ statuses: PLANT_EDITABLE_STATUSES, source: user.posConfigId }),
+      ]);
+      return this.toDocs([...toReceive, ...toSupply]);
+    }
+    return [];
+  }
+
   async findNotifications(user: AuthenticatedUser): Promise<StockRequestNotificationsDoc> {
     if (user.role === Role.PLANTA) {
       return { pending: await this.repository.count({ statuses: PLANT_EDITABLE_STATUSES, source: 'plant' }) };

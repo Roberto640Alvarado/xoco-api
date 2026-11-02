@@ -8,6 +8,7 @@ import { SalespersonSalesService } from './services/salesperson-sales.service.js
 import { StoreInvoiceTotalsService } from './services/store-invoice-totals.service.js';
 import { WholesaleClientTotalsService } from './services/wholesale-client-totals.service.js';
 import { CustomerSearchService } from './services/customer-search.service.js';
+import { TodaySalesService } from './services/today-sales.service.js';
 
 @Module({
   imports: [OdooModule],
@@ -19,6 +20,7 @@ import { CustomerSearchService } from './services/customer-search.service.js';
     WholesaleClientTotalsService,
     CustomerSearchService,
     PosTicketsService,
+    TodaySalesService,
   ],
   exports: [
     SalesService,

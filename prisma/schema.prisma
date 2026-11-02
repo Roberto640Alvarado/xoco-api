@@ -512,3 +512,86 @@ model OAuthRefreshToken {
   @@index([userId])
   @@map("oauth_refresh_tokens")
 }
+
+// Xoco IA: llaves de API de Claude y OpenAI que el Super admin guarda desde
+// el panel. La llave va cifrada (AES-256-GCM, ver ai-key-crypto.util.ts);
+// solo se muestran sus últimos 4 caracteres. Sin registro aquí se usa la
+// variable de entorno del servidor.
+model AiProviderKey {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  // 'claude' | 'openai'
+  provider       String    @unique
+  encryptedKey   String
+  last4          String
+  // Resultado de la última prueba: OK | SIN_CREDITO | INVALIDA | ERROR
+  status         String
+  statusMessage  String?
+  checkedAt      DateTime?
+  updatedByEmail String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("ai_provider_keys")
+}
+
+// Una fila por pregunta a Xoco IA: quién, cuándo, con qué modelo, tokens y
+// costo estimado en USD (precio por millón de tokens del modelo). No guarda
+// el texto de la pregunta: el gasto no necesita saber qué preguntó cada quien.
+model AiUsageLog {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  provider     String
+  model        String
+  userId       String   @db.ObjectId
+  userEmail    String
+  userName     String?
+  inputTokens  Int
+  outputTokens Int
+  costUsd      Float
+  steps        Int
+  toolCalls    Int
+  // OK | ERROR | DETENIDA
+  status       String
+  errorMessage String?
+  durationMs   Int
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("ai_usage_logs")
+}
+
+// Conversaciones de Xoco IA. Cada una es de un solo usuario: solo él la ve,
+// la busca, la renombra o la borra (el servidor filtra siempre por userId).
+model AiConversation {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  title     String
+  // Última IA usada en la conversación: 'claude' | 'openai'
+  provider  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+  @@map("ai_conversations")
+}
+
+model AiConversationMessage {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  conversationId String   @db.ObjectId
+  userId         String   @db.ObjectId
+  // 'user' | 'assistant'
+  role           String
+  // Pregunta del usuario, o el texto de la respuesta (para buscar y como historial).
+  text           String
+  // Respuesta completa en orden: pasos, texto, gráficas, tablas y errores.
+  blocks         Json?
+  provider       String?
+  model          String?
+  // Solo respuestas: 'done' | 'error' | 'stopped'
+  status         String?
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([userId])
+  @@map("ai_conversation_messages")
+}

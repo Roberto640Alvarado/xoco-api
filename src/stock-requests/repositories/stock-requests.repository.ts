@@ -107,6 +107,14 @@ export class StockRequestsRepository {
     return this.prisma.storeStockRequest.count({ where: toWhere(filters) });
   }
 
+  /** Solicitudes a planta creadas desde `since` o todavía abiertas (para el resumen de Inicio). */
+  findPlantForSummary(since: Date, openStatuses: StockRequestStatus[]) {
+    return this.prisma.storeStockRequest.findMany({
+      where: { AND: [FROM_PLANT, { OR: [{ createdAt: { gte: since } }, { status: { in: openStatuses } }] }] },
+      select: { posConfigId: true, status: true, createdAt: true, receivedAt: true, lines: { select: { requestedQuantity: true, addedByPlant: true } } },
+    });
+  }
+
   // Guarda un cambio SOLO si nadie más tocó la solicitud desde que se leyó
   // (mismo updatedAt): evita que dos personas pisen la respuesta de planta
   // o que la tienda reciba dos veces el mismo envío. Devuelve false si
