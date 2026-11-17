@@ -5,6 +5,7 @@ import { DEFAULT_OPENAI_MODEL } from '../providers/openai.provider.js';
 import { AiKeysRepository } from '../repositories/ai-keys.repository.js';
 import { decryptSecret, encryptSecret, lastFour } from '../utils/ai-key-crypto.util.js';
 import { AiKeyCheck, testAiKey } from './ai-key-tester.js';
+import { AiUsageService } from './ai-usage.service.js';
 
 export const AI_PROVIDERS: { key: AiProviderKey; label: string; envKey: string; envModel: string; defaultModel: string }[] = [
   { key: 'claude', label: 'Claude', envKey: 'ANTHROPIC_API_KEY', envModel: 'AI_CLAUDE_MODEL', defaultModel: DEFAULT_CLAUDE_MODEL },
@@ -40,7 +41,10 @@ function definition(provider: AiProviderKey) {
 export class AiKeysService {
   private cache = new Map<AiProviderKey, { key: string | null; at: number }>();
 
-  constructor(private readonly repository: AiKeysRepository) {}
+  constructor(
+    private readonly repository: AiKeysRepository,
+    private readonly usageService: AiUsageService,
+  ) {}
 
   model(provider: AiProviderKey): string {
     const item = definition(provider);
@@ -85,8 +89,9 @@ export class AiKeysService {
     });
   }
 
-  /** Prueba la llave y, si sirve (o solo le falta crédito), la guarda cifrada. */
-  async save(provider: AiProviderKey, apiKey: string, email: string): Promise<{ check: AiKeyCheck; keys: AiKeyDoc[] }> {
+  /** Prueba la llave y, si sirve (o solo le falta crédito), la guarda cifrada.
+   * Con `resetUsage`, el Gasto de ese proveedor empieza de cero (solo si se guardó). */
+  async save(provider: AiProviderKey, apiKey: string, email: string, resetUsage = false): Promise<{ check: AiKeyCheck; keys: AiKeyDoc[] }> {
     definition(provider);
     const key = apiKey.trim();
     const check = await testAiKey(provider, key, this.model(provider));
@@ -102,6 +107,7 @@ export class AiKeysService {
       updatedByEmail: email,
     });
     this.cache.delete(provider);
+    if (resetUsage) await this.usageService.resetCounter(provider, email);
     return { check, keys: await this.list() };
   }
 

@@ -4,6 +4,7 @@ import { decryptSecret, encryptSecret, lastFour } from '../utils/ai-key-crypto.u
 import { estimateCost } from '../utils/ai-pricing.util.js';
 import { AiKeysService } from '../services/ai-keys.service.js';
 import type { AiKeysRepository } from '../repositories/ai-keys.repository.js';
+import type { AiUsageService } from '../services/ai-usage.service.js';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -53,16 +54,30 @@ describe('AiKeysService', () => {
       updateStatus: vi.fn(async () => undefined),
       remove: vi.fn(async () => undefined),
     };
-    return { keys: new AiKeysService(repository as unknown as AiKeysRepository), repository };
+    const usage = { resetCounter: vi.fn(async () => undefined) };
+    return { keys: new AiKeysService(repository as unknown as AiKeysRepository, usage as unknown as AiUsageService), repository, usage };
   }
 
   afterEach(() => vi.unstubAllGlobals());
 
   it('no guarda una llave inválida', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json(401, { error: { message: 'bad' } })));
-    const { keys, repository } = service();
-    await expect(keys.save('claude', 'sk-ant-invalida-0000000', 'admin@xoco.com')).rejects.toThrow('No se guardó la llave');
+    const { keys, repository, usage } = service();
+    await expect(keys.save('claude', 'sk-ant-invalida-0000000', 'admin@xoco.com', true)).rejects.toThrow('No se guardó la llave');
     expect(repository.upsert).not.toHaveBeenCalled();
+    expect(usage.resetCounter).not.toHaveBeenCalled();
+  });
+
+  it('reinicia el contador de gasto solo si se pidió y la llave se guardó', async () => {
+    process.env.JWT_SECRET ??= 'test-secret';
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, {})));
+    const withReset = service();
+    await withReset.keys.save('openai', 'sk-nueva-llave-000000001', 'admin@xoco.com', true);
+    expect(withReset.usage.resetCounter).toHaveBeenCalledWith('openai', 'admin@xoco.com');
+
+    const withoutReset = service();
+    await withoutReset.keys.save('openai', 'sk-nueva-llave-000000002', 'admin@xoco.com');
+    expect(withoutReset.usage.resetCounter).not.toHaveBeenCalled();
   });
 
   it('guarda cifrada una llave sin crédito, con su aviso', async () => {

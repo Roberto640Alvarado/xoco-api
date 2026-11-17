@@ -66,10 +66,11 @@ export class AiChatController {
 
   @Put('keys/:provider')
   @ApiOperation({
-    summary: 'Guarda (o reemplaza) la llave de un proveedor. Antes la prueba con una petición mínima: si es inválida no se guarda; sin crédito se guarda con aviso.',
+    summary:
+      'Guarda (o reemplaza) la llave de un proveedor. Antes la prueba con una petición mínima: si es inválida no se guarda; sin crédito se guarda con aviso. Con resetUsage=true, el Gasto de ese proveedor empieza de cero.',
   })
   saveKey(@Param('provider', PROVIDER_PARAM) provider: 'claude' | 'openai', @Body() dto: SaveAiKeyDto, @User() user: AuthenticatedUser) {
-    return this.keysService.save(provider, dto.apiKey, user.email);
+    return this.keysService.save(provider, dto.apiKey, user.email, dto.resetUsage ?? false);
   }
 
   @Post('keys/:provider/test')

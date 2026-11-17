@@ -534,6 +534,22 @@ model AiProviderKey {
   @@map("ai_provider_keys")
 }
 
+// Reinicio del contador de Gasto por proveedor: al cambiar una llave, el
+// Super admin puede pedir que el Gasto de esa IA empiece de cero desde ese
+// momento. No se borra nada de ai_usage_logs; el resumen de Gasto solo
+// ignora las consultas de ese proveedor anteriores a `resetAt`. Vive aparte
+// de AiProviderKey para que quitar la llave no deshaga el reinicio.
+model AiUsageReset {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  // 'claude' | 'openai'
+  provider     String   @unique
+  resetAt      DateTime
+  resetByEmail String
+  updatedAt    DateTime @updatedAt
+
+  @@map("ai_usage_resets")
+}
+
 // Una fila por pregunta a Xoco IA: quién, cuándo, con qué modelo, tokens y
 // costo estimado en USD (precio por millón de tokens del modelo). No guarda
 // el texto de la pregunta: el gasto no necesita saber qué preguntó cada quien.

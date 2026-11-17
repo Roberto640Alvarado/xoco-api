@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { Role, User } from '../../generated/prisma/index.js';
 import { AiUsageService } from '../services/ai-usage.service.js';
 import type { AiUsageRepository } from '../repositories/ai-usage.repository.js';
+import type { AiUsageResetsRepository } from '../repositories/ai-usage-resets.repository.js';
+
+const noResets = { findAll: vi.fn(async () => []), upsert: vi.fn() } as unknown as AiUsageResetsRepository;
 
 const row = (createdAt: string, provider: string, userId: string, costUsd: number, status = 'OK') => ({
   provider,
@@ -28,7 +31,7 @@ describe('AiUsageService', () => {
       findPage: vi.fn(async () => []),
       count: vi.fn(async () => 3),
     };
-    const service = new AiUsageService(repository as unknown as AiUsageRepository);
+    const service = new AiUsageService(repository as unknown as AiUsageRepository, noResets);
     const result = await service.find({ dateFrom: '2026-10-31', dateTo: '2026-11-01' });
 
     const where = (repository.findForSummary.mock.calls[0] as unknown as [{ createdAt: { gte: Date; lt: Date } }])[0];
@@ -46,7 +49,7 @@ describe('AiUsageService', () => {
   it('con filtro de usuario, los totales son de ese usuario pero la lista de usuarios trae a todos', async () => {
     const rows = [row('2026-11-01T15:00:00Z', 'claude', 'a', 0.2), row('2026-11-01T16:00:00Z', 'openai', 'b', 0.05)];
     const repository = { findForSummary: vi.fn(async () => rows), findPage: vi.fn(async () => []), count: vi.fn(async () => 1) };
-    const service = new AiUsageService(repository as unknown as AiUsageRepository);
+    const service = new AiUsageService(repository as unknown as AiUsageRepository, noResets);
     const result = await service.find({ dateFrom: '2026-11-01', dateTo: '2026-11-01', userId: 'b' });
     expect(result.totals).toMatchObject({ costUsd: 0.05, queries: 1 });
     expect(result.byUser.map((user) => user.userId)).toEqual(['a', 'b']);
@@ -54,9 +57,25 @@ describe('AiUsageService', () => {
     expect(pageWhere.userId).toBe('b');
   });
 
+  it('con un reinicio de contador, ignora las consultas de ese proveedor anteriores al reinicio', async () => {
+    const resetAt = new Date('2026-11-10T15:00:00Z');
+    const resets = { findAll: vi.fn(async () => [{ provider: 'openai', resetAt, resetByEmail: 'admin@xoco.com' }]) };
+    const repository = { findForSummary: vi.fn(async () => []), findPage: vi.fn(async () => []), count: vi.fn(async () => 0) };
+    const service = new AiUsageService(repository as unknown as AiUsageRepository, resets as unknown as AiUsageResetsRepository);
+    const result = await service.find({ dateFrom: '2026-11-01', dateTo: '2026-11-16', userId: 'b' });
+
+    const summaryWhere = (repository.findForSummary.mock.calls[0] as unknown as [{ NOT?: unknown }])[0];
+    const pageWhere = (repository.findPage.mock.calls[0] as unknown as [{ NOT?: unknown; userId?: string }])[0];
+    const expected = { OR: [{ provider: 'openai', createdAt: { lt: resetAt } }] };
+    expect(summaryWhere.NOT).toEqual(expected);
+    expect(pageWhere.NOT).toEqual(expected);
+    expect(pageWhere.userId).toBe('b');
+    expect(result.resets).toEqual([{ provider: 'openai', resetAt, resetByEmail: 'admin@xoco.com' }]);
+  });
+
   it('registrar nunca rompe el chat aunque falle la base', async () => {
     const repository = { create: vi.fn(async () => Promise.reject(new Error('mongo caído'))) };
-    const service = new AiUsageService(repository as unknown as AiUsageRepository);
+    const service = new AiUsageService(repository as unknown as AiUsageRepository, noResets);
     await expect(
       service.record({
         user: { id: 'u', email: 'a@x.com', name: 'A', role: Role.SUPER_ADMIN } as User,

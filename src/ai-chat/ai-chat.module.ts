@@ -10,6 +10,7 @@ import { AiKeysService } from './services/ai-keys.service.js';
 import { AiUsageService } from './services/ai-usage.service.js';
 import { AiKeysRepository } from './repositories/ai-keys.repository.js';
 import { AiUsageRepository } from './repositories/ai-usage.repository.js';
+import { AiUsageResetsRepository } from './repositories/ai-usage-resets.repository.js';
 import { AiConversationsRepository } from './repositories/ai-conversations.repository.js';
 import { AiConversationsService } from './services/ai-conversations.service.js';
 
@@ -18,6 +19,6 @@ import { AiConversationsService } from './services/ai-conversations.service.js';
 @Module({
   imports: [McpModule, UsersModule],
   controllers: [AiChatController],
-  providers: [AiChatService, AiChatToolsService, AnthropicProvider, OpenAiProvider, AiKeysService, AiUsageService, AiKeysRepository, AiUsageRepository, AiConversationsRepository, AiConversationsService],
+  providers: [AiChatService, AiChatToolsService, AnthropicProvider, OpenAiProvider, AiKeysService, AiUsageService, AiKeysRepository, AiUsageRepository, AiUsageResetsRepository, AiConversationsRepository, AiConversationsService],
 })
 export class AiChatModule {}

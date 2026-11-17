@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, User } from '../../generated/prisma/index.js';
 import { AiProviderKey } from '../providers/provider.types.js';
 import { AiUsageRepository } from '../repositories/ai-usage.repository.js';
+import { AiUsageResetsRepository } from '../repositories/ai-usage-resets.repository.js';
 import { estimateCost } from '../utils/ai-pricing.util.js';
 import { FindAiUsageQueryDto } from '../dto/find-ai-usage-query.dto.js';
 
@@ -39,7 +40,15 @@ const round = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
 export class AiUsageService {
   private readonly logger = new Logger(AiUsageService.name);
 
-  constructor(private readonly repository: AiUsageRepository) {}
+  constructor(
+    private readonly repository: AiUsageRepository,
+    private readonly resetsRepository: AiUsageResetsRepository,
+  ) {}
+
+  /** El Gasto de este proveedor empieza de cero desde ahora (no borra el historial). */
+  async resetCounter(provider: AiProviderKey, email: string): Promise<void> {
+    await this.resetsRepository.upsert(provider, email);
+  }
 
   async record(input: RecordUsageInput): Promise<void> {
     try {
@@ -74,6 +83,11 @@ export class AiUsageService {
       createdAt: { gte: localDayStart(dateFrom), lt: localDayStart(addDays(dateTo, 1)) },
       ...(query.provider ? { provider: query.provider } : {}),
     };
+    // Consultas de un proveedor anteriores a su reinicio de contador: no cuentan.
+    const resets = await this.resetsRepository.findAll();
+    if (resets.length > 0) {
+      baseWhere.NOT = { OR: resets.map((reset) => ({ provider: reset.provider, createdAt: { lt: reset.resetAt } })) };
+    }
     const where: Prisma.AiUsageLogWhereInput = { ...baseWhere, ...(query.userId ? { userId: query.userId } : {}) };
     const page = query.page ?? 1;
     const limit = query.limit ?? 25;
@@ -128,6 +142,7 @@ export class AiUsageService {
     return {
       dateFrom,
       dateTo,
+      resets: resets.map((reset) => ({ provider: reset.provider, resetAt: reset.resetAt, resetByEmail: reset.resetByEmail })),
       totals: { ...totals, costUsd: round(totals.costUsd), averageCostUsd: totals.queries ? round(totals.costUsd / totals.queries) : 0 },
       byDay: [...byDay.values()].map((day) => ({ ...day, costUsd: round(day.costUsd), claude: round(day.claude), openai: round(day.openai) })),
       byProvider: [...byProvider.values()].map((item) => ({ ...item, costUsd: round(item.costUsd) })).sort((a, b) => b.costUsd - a.costUsd),
