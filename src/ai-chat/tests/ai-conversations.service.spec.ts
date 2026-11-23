@@ -7,14 +7,20 @@ import type { AiChatEvent, AiChatService } from '../services/ai-chat.service.js'
 const USER = { id: 'a'.repeat(24), email: 'admin@xoco.com', role: Role.SUPER_ADMIN } as User;
 const CONV = { id: 'c'.repeat(24), userId: USER.id, title: 'Ventas', provider: 'claude', createdAt: new Date(), updatedAt: new Date() };
 
-function setup(previous: Array<{ role: string; text: string; status?: string | null }> = []) {
+type StoredMessage = { id?: string; role: string; text: string; status?: string | null; attachments?: unknown };
+
+function setup(previous: StoredMessage[] = [], files: Array<Record<string, unknown>> = []) {
   const repository = {
     list: vi.fn(async () => [CONV]),
     findOwned: vi.fn(async (id: string, userId: string) => (id === CONV.id && userId === USER.id ? CONV : null)),
     create: vi.fn(async () => CONV),
     update: vi.fn(async () => CONV),
     messages: vi.fn(async () => previous),
-    addMessage: vi.fn(async () => undefined),
+    addMessage: vi.fn(async () => ({ id: 'm'.repeat(24) })),
+    addAttachment: vi.fn(async () => ({ id: 'f'.repeat(24) })),
+    updateMessageAttachments: vi.fn(async () => undefined),
+    attachmentsOf: vi.fn(async () => files),
+    findAttachment: vi.fn(async (id: string) => files.find((file) => file.id === id) ?? null),
     remove: vi.fn(async () => undefined),
   };
   const chat = {
@@ -65,6 +71,63 @@ describe('AiConversationsService', () => {
     expect(ctx.chat.titleSession).not.toHaveBeenCalled();
     const runInput = ctx.chat.run.mock.calls[0] as unknown as [{ messages: { content: string }[] }];
     expect(runInput[0].messages.map((message) => message.content)).toEqual(['hola', 'otra vez', 'Listo.', 'y ahora?']);
+  });
+
+  it('guarda los archivos de la pregunta, avisa al panel y se los pasa a la IA', async () => {
+    const ctx = setup();
+    const events: Array<Record<string, unknown>> = [];
+    await ctx.service.ask({
+      user: USER,
+      provider: 'claude',
+      message: '',
+      attachments: [
+        { name: 'ticket.png', mimeType: 'image/png', kind: 'image', size: 3, data: 'AAAA' },
+        { name: 'ventas.csv', mimeType: 'text/csv', kind: 'text', size: 9, data: 'mes,total' },
+      ],
+      emit: (event) => events.push(event as Record<string, unknown>),
+    });
+
+    expect(ctx.repository.create).toHaveBeenCalledWith(expect.objectContaining({ title: 'ticket.png' }));
+    expect(ctx.repository.addAttachment).toHaveBeenCalledTimes(2);
+    expect(ctx.repository.addAttachment).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'm'.repeat(24), userId: USER.id, name: 'ticket.png', data: 'AAAA' }));
+    expect(ctx.repository.updateMessageAttachments).toHaveBeenCalledWith('m'.repeat(24), [
+      { id: 'f'.repeat(24), name: 'ticket.png', mimeType: 'image/png', kind: 'image', size: 3 },
+      { id: 'f'.repeat(24), name: 'ventas.csv', mimeType: 'text/csv', kind: 'text', size: 9 },
+    ]);
+    expect(events.find((event) => event.type === 'attachments')).toMatchObject({ messageId: 'm'.repeat(24) });
+
+    const runInput = ctx.chat.run.mock.calls[0] as unknown as [{ messages: Array<{ content: string; attachments?: unknown[] }> }];
+    const last = runInput[0].messages.at(-1);
+    expect(last?.content).toContain('Revisa los archivos adjuntos');
+    expect(last?.attachments).toEqual([
+      { kind: 'image', name: 'ticket.png', mimeType: 'image/png', data: 'AAAA' },
+      { kind: 'text', name: 'ventas.csv', text: 'mes,total' },
+    ]);
+  });
+
+  it('en preguntas siguientes vuelve a pasar los archivos guardados del chat', async () => {
+    const meta = [{ id: 'f'.repeat(24), name: 'reporte.pdf', mimeType: 'application/pdf', kind: 'pdf', size: 10 }];
+    const ctx = setup(
+      [
+        { id: '1'.repeat(24), role: 'user', text: 'Lee esto', attachments: meta },
+        { id: '2'.repeat(24), role: 'assistant', text: 'Listo, es un reporte.', status: 'done' },
+      ],
+      [{ id: 'f'.repeat(24), messageId: '1'.repeat(24), name: 'reporte.pdf', mimeType: 'application/pdf', kind: 'pdf', data: 'JVBERi0=' }],
+    );
+    await ctx.service.ask({ user: USER, provider: 'claude', conversationId: CONV.id, message: '¿Y el total?', emit: () => undefined });
+
+    expect(ctx.repository.attachmentsOf).toHaveBeenCalledWith(CONV.id, USER.id, ['1'.repeat(24)]);
+    const runInput = ctx.chat.run.mock.calls[0] as unknown as [{ messages: Array<{ content: string; attachments?: unknown[] }> }];
+    expect(runInput[0].messages[0]).toEqual({ role: 'user', content: 'Lee esto', attachments: [{ kind: 'pdf', name: 'reporte.pdf', data: 'JVBERi0=' }] });
+    expect(runInput[0].messages.at(-1)).toEqual({ role: 'user', content: '¿Y el total?' });
+  });
+
+  it('solo el dueño del chat puede ver sus archivos', async () => {
+    const ctx = setup([], [{ id: 'f'.repeat(24), messageId: 'm'.repeat(24), name: 'nota.txt', mimeType: 'text/plain', kind: 'text', data: 'hola' }]);
+    await expect(ctx.service.attachment(CONV.id, 'f'.repeat(24), 'b'.repeat(24))).rejects.toThrow('no es tuyo');
+    const file = await ctx.service.attachment(CONV.id, 'f'.repeat(24), USER.id);
+    expect(file).toMatchObject({ name: 'nota.txt', mimeType: 'text/plain' });
+    expect(file.body.toString('utf8')).toBe('hola');
   });
 
   it('nadie ve, renombra ni borra el chat de otro', async () => {

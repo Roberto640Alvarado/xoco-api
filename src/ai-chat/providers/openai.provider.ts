@@ -1,5 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { AiProvider, AiProviderError, AiProviderSession, AiSessionInput, AiStep, AiToolResult, providerErrorMessage } from './provider.types.js';
+import {
+  AiAttachmentContent,
+  AiChatMessage,
+  AiProvider,
+  AiProviderError,
+  AiProviderSession,
+  AiSessionInput,
+  AiStep,
+  AiToolResult,
+  attachmentTextBlock,
+  providerErrorMessage,
+} from './provider.types.js';
 
 const API_URL = 'https://api.openai.com/v1/responses';
 export const DEFAULT_OPENAI_MODEL = 'gpt-6.1-sol';
@@ -27,6 +38,22 @@ function parseArguments(raw: string): Record<string, unknown> {
   }
 }
 
+function attachmentPart(attachment: AiAttachmentContent): Record<string, unknown> {
+  if (attachment.kind === 'image') return { type: 'input_image', image_url: `data:${attachment.mimeType};base64,${attachment.data}` };
+  if (attachment.kind === 'pdf') return { type: 'input_file', filename: attachment.name, file_data: `data:application/pdf;base64,${attachment.data}` };
+  return { type: 'input_text', text: attachmentTextBlock(attachment) };
+}
+
+/** Mensaje del historial en formato de la Responses API (con adjuntos si los trae). */
+export function toOpenAiItem(message: AiChatMessage): ResponseItem {
+  if (!message.attachments?.length) return { type: 'message', role: message.role, content: message.content };
+  return {
+    type: 'message',
+    role: message.role,
+    content: [...message.attachments.map(attachmentPart), { type: 'input_text', text: message.content }],
+  };
+}
+
 // OpenAI (ChatGPT) por la Responses API: los modelos GPT-6.x razonan y solo
 // aceptan herramientas (function calling) con razonamiento en /v1/responses,
 // no en Chat Completions. Sin guardar nada en OpenAI (store: false): el
@@ -48,7 +75,7 @@ export class OpenAiProvider implements AiProvider {
       // Los esquemas de las herramientas tienen campos opcionales: sin modo estricto.
       strict: false,
     }));
-    const items: ResponseItem[] = input.messages.map((message) => ({ type: 'message', role: message.role, content: message.content }));
+    const items: ResponseItem[] = input.messages.map(toOpenAiItem);
 
     return {
       async step(signal?: AbortSignal): Promise<AiStep> {

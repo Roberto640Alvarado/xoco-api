@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, User } from '../../generated/prisma/index.js';
 import { AiChatMessage, AiProviderKey } from '../providers/provider.types.js';
 import { AiConversationsRepository } from '../repositories/ai-conversations.repository.js';
+import { PreparedAttachment, StoredAttachmentMeta, toAttachmentContent } from '../utils/ai-attachments.util.js';
 import { AiChatEvent, AiChatService } from './ai-chat.service.js';
 
 /** Pedazo de una respuesta guardada (mismo formato que dibuja el panel). */
@@ -47,8 +48,25 @@ interface AskInput {
   provider: AiProviderKey;
   conversationId?: string;
   message: string;
+  /** Archivos ya validados con prepareAttachments. */
+  attachments?: PreparedAttachment[];
   signal?: AbortSignal;
-  emit: (event: AiChatEvent | { type: 'conversation'; id: string; title: string } | { type: 'title'; id: string; title: string }) => void;
+  emit: (event: AiConversationEvent) => void;
+}
+
+/** Eventos del stream además de los del agente: chat creado, título y adjuntos guardados. */
+export type AiConversationEvent =
+  | AiChatEvent
+  | { type: 'conversation'; id: string; title: string }
+  | { type: 'title'; id: string; title: string }
+  | { type: 'attachments'; messageId: string; attachments: StoredAttachmentMeta[] };
+
+/** Lo que recibe la IA cuando el usuario solo manda archivos, sin texto. */
+const ATTACHMENTS_ONLY_PROMPT = 'Revisa los archivos adjuntos y dime qué contienen y qué es lo más importante.';
+
+/** Texto de una pregunta para la IA (con o sin archivos). */
+function questionContent(text: string, hasAttachments: boolean): string {
+  return text.trim() || (hasAttachments ? ATTACHMENTS_ONLY_PROMPT : '');
 }
 
 const TITLE_PROMPT = `Escribe un título corto (de 2 a 6 palabras) en español para un chat que empieza con esta pregunta y respuesta.
@@ -102,6 +120,7 @@ export class AiConversationsService {
         role: message.role,
         text: message.text,
         blocks: (message.blocks as StoredBlock[] | null) ?? null,
+        attachments: (message.attachments as StoredAttachmentMeta[] | null) ?? null,
         provider: message.provider,
         model: message.model,
         status: message.status,
@@ -121,26 +140,70 @@ export class AiConversationsService {
     await this.repository.remove(id, userId);
   }
 
+  /** Un archivo adjunto de un chat propio (para verlo o descargarlo en el panel). */
+  async attachment(conversationId: string, attachmentId: string, userId: string) {
+    await this.owned(conversationId, userId);
+    const attachment = /^[a-f0-9]{24}$/i.test(attachmentId) ? await this.repository.findAttachment(attachmentId, conversationId, userId) : null;
+    if (!attachment) throw new NotFoundException('Ese archivo no existe o no es tuyo.');
+    const body = attachment.kind === 'text' ? Buffer.from(attachment.data, 'utf8') : Buffer.from(attachment.data, 'base64');
+    return { name: attachment.name, mimeType: attachment.mimeType, body };
+  }
+
+  /** Historial para la IA: lo guardado del chat, con el contenido de los archivos de cada pregunta. */
+  private async history(conversationId: string, userId: string): Promise<AiChatMessage[]> {
+    const previous = (await this.repository.messages(conversationId, userId))
+      .filter((item) => item.role === 'user' || item.status !== 'error')
+      .filter((item) => item.text.trim().length > 0 || Boolean((item.attachments as StoredAttachmentMeta[] | null)?.length))
+      .slice(-MAX_HISTORY);
+
+    const withFiles = previous.filter((item) => item.role === 'user' && (item.attachments as StoredAttachmentMeta[] | null)?.length).map((item) => item.id);
+    const files = withFiles.length ? await this.repository.attachmentsOf(conversationId, userId, withFiles) : [];
+
+    return previous.map((item) => {
+      const attachments = files.filter((file) => file.messageId === item.id).map(toAttachmentContent);
+      return {
+        role: item.role as 'user' | 'assistant',
+        content: item.role === 'user' ? questionContent(item.text, attachments.length > 0) : item.text,
+        ...(attachments.length ? { attachments } : {}),
+      };
+    });
+  }
+
+  /** Guarda los archivos de una pregunta y deja su lista (sin contenido) en el mensaje. */
+  private async saveAttachments(conversationId: string, messageId: string, userId: string, attachments: PreparedAttachment[]) {
+    const stored: StoredAttachmentMeta[] = [];
+    for (const attachment of attachments) {
+      const { id } = await this.repository.addAttachment({ conversationId, messageId, userId, ...attachment });
+      stored.push({ id, name: attachment.name, mimeType: attachment.mimeType, kind: attachment.kind, size: attachment.size });
+    }
+    await this.repository.updateMessageAttachments(messageId, stored as unknown as Prisma.InputJsonValue);
+    return stored;
+  }
+
   /** Pregunta dentro de un chat (o crea uno nuevo) y guarda pregunta y respuesta. */
-  async ask({ user, provider, conversationId, message, signal, emit }: AskInput): Promise<void> {
+  async ask({ user, provider, conversationId, message, attachments = [], signal, emit }: AskInput): Promise<void> {
     const question = message.trim();
     // Valida el proveedor antes de crear nada.
     const { model } = await this.chatService.resolve(provider);
 
     const conversation = conversationId
       ? await this.owned(conversationId, user.id)
-      : await this.repository.create({ userId: user.id, title: titleFrom(question), provider });
+      : await this.repository.create({ userId: user.id, title: titleFrom(question || attachments[0]?.name || ''), provider });
     emit({ type: 'conversation', id: conversation.id, title: conversation.title });
 
-    const previous = await this.repository.messages(conversation.id, user.id);
-    const history: AiChatMessage[] = previous
-      .filter((item) => item.role === 'user' || item.status !== 'error')
-      .map((item) => ({ role: item.role as 'user' | 'assistant', content: item.text }))
-      .filter((item) => item.content.trim().length > 0)
-      .slice(-MAX_HISTORY);
-    history.push({ role: 'user', content: question });
+    const history = await this.history(conversation.id, user.id);
+    const current: AiChatMessage = {
+      role: 'user',
+      content: questionContent(question, attachments.length > 0),
+      ...(attachments.length ? { attachments: attachments.map(toAttachmentContent) } : {}),
+    };
+    history.push(current);
 
-    await this.repository.addMessage({ conversationId: conversation.id, userId: user.id, role: 'user', text: question });
+    const saved = await this.repository.addMessage({ conversationId: conversation.id, userId: user.id, role: 'user', text: question });
+    if (attachments.length) {
+      const stored = await this.saveAttachments(conversation.id, saved.id, user.id, attachments);
+      emit({ type: 'attachments', messageId: saved.id, attachments: stored });
+    }
 
     const blocks: StoredBlock[] = [];
     let status = 'stopped' as 'done' | 'error' | 'stopped';
@@ -179,7 +242,7 @@ export class AiConversationsService {
     // Como ChatGPT: al terminar la primera respuesta de un chat nuevo, la IA
     // le pone un título corto. Si falla, se queda el inicio de la pregunta.
     if (!conversationId && status === 'done' && !signal?.aborted) {
-      const title = await this.generateTitle(provider, question, blocksText(blocks), signal);
+      const title = await this.generateTitle(provider, question || `Archivos: ${attachments.map((file) => file.name).join(', ')}`, blocksText(blocks), signal);
       if (title) {
         await this.repository.update(conversation.id, { title }).catch(() => undefined);
         emit({ type: 'title', id: conversation.id, title });

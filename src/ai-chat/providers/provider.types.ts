@@ -29,10 +29,26 @@ export interface AiStep {
   usage: { inputTokens: number; outputTokens: number };
 }
 
-/** Mensaje del historial que manda el panel (solo texto). */
+/**
+ * Archivo adjunto ya listo para mandarse a la IA. Imágenes y PDF van en
+ * base64 (ambos proveedores los leen directo); los de texto (CSV, TXT, JSON,
+ * y Excel que el panel convierte a CSV) van como texto.
+ */
+export type AiAttachmentContent =
+  | { kind: 'image'; name: string; mimeType: string; data: string }
+  | { kind: 'pdf'; name: string; data: string }
+  | { kind: 'text'; name: string; text: string };
+
+/** Mensaje del historial (texto y, en preguntas, archivos adjuntos). */
 export interface AiChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  attachments?: AiAttachmentContent[];
+}
+
+/** Cómo se presenta un archivo de texto dentro del mensaje. */
+export function attachmentTextBlock(attachment: { name: string; text: string }): string {
+  return `Archivo adjunto "${attachment.name}":\n\n${attachment.text}`;
 }
 
 /** Una conversación en curso con un proveedor: guarda sus mensajes en su propio formato. */

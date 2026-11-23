@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, NotFoundException, Param, ParseEnumPipe, Patch, Post, Put, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, NotFoundException, Param, ParseEnumPipe, Patch, Post, Put, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Role } from '../../generated/prisma/index.js';
@@ -7,8 +7,9 @@ import { User } from '../../common/decorators/user.decorator.js';
 import type { AuthenticatedUser } from '../../common/interfaces/jwt-payload.interface.js';
 import { UsersService } from '../../users/services/users.service.js';
 import { AiChatRequestDto, FindConversationsQueryDto, RenameConversationDto } from '../dto/ai-chat-request.dto.js';
-import { AiConversationsService } from '../services/ai-conversations.service.js';
-import { AiChatEvent, AiChatService } from '../services/ai-chat.service.js';
+import { AiConversationEvent, AiConversationsService } from '../services/ai-conversations.service.js';
+import { AiChatService } from '../services/ai-chat.service.js';
+import { prepareAttachments } from '../utils/ai-attachments.util.js';
 import { AiKeysService } from '../services/ai-keys.service.js';
 import { AiUsageService } from '../services/ai-usage.service.js';
 import { SaveAiKeyDto } from '../dto/save-ai-key.dto.js';
@@ -49,6 +50,18 @@ export class AiChatController {
   @ApiOperation({ summary: 'Cambia el nombre de un chat propio.' })
   renameConversation(@User() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: RenameConversationDto) {
     return this.conversations.rename(id, user.id, dto.title);
+  }
+
+  @Get('conversations/:id/attachments/:attachmentId')
+  @ApiOperation({ summary: 'Descarga un archivo adjunto de un chat propio (imagen, PDF o texto) con su tipo original.' })
+  async getAttachment(@User() user: AuthenticatedUser, @Param('id') id: string, @Param('attachmentId') attachmentId: string, @Res() res: Response) {
+    const file = await this.conversations.attachment(id, attachmentId, user.id);
+    res.setHeader('Content-Type', file.mimeType.startsWith('text/') || file.mimeType === 'application/json' ? `${file.mimeType}; charset=utf-8` : file.mimeType);
+    res.setHeader('Content-Length', String(file.body.length));
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(file.body);
   }
 
   @Delete('conversations/:id')
@@ -102,11 +115,13 @@ export class AiChatController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Pregunta a Xoco IA dentro de un chat (o crea uno). Responde como text/event-stream con eventos conversation, start, tool, text, chart, table, done y error; pregunta y respuesta quedan guardadas.',
+      'Pregunta a Xoco IA dentro de un chat (o crea uno), con archivos opcionales (imágenes, PDF, CSV/texto) que la IA lee. Responde como text/event-stream con eventos conversation, attachments, start, tool, text, chart, table, title, done y error; pregunta, archivos y respuesta quedan guardados.',
   })
   async stream(@Body() dto: AiChatRequestDto, @User() authUser: AuthenticatedUser, @Res() res: Response) {
-    // Valida antes de abrir el stream: así un proveedor sin llave da 400 normal.
+    // Valida antes de abrir el stream: así un proveedor sin llave o un archivo inválido da 400 normal.
     await this.chatService.resolve(dto.provider);
+    const attachments = prepareAttachments(dto.attachments);
+    if (!dto.message.trim() && attachments.length === 0) throw new BadRequestException('Escribe una pregunta o adjunta un archivo.');
     const user = await this.usersService.findById(authUser.id);
     if (!user) throw new NotFoundException('Usuario no encontrado.');
 
@@ -120,7 +135,7 @@ export class AiChatController {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
-    const emit = (event: AiChatEvent | { type: 'conversation' | 'title'; id: string; title: string }) => {
+    const emit = (event: AiConversationEvent) => {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
     };
     // Latido para que proxies no corten la conexión mientras la IA piensa.
@@ -134,6 +149,7 @@ export class AiChatController {
         provider: dto.provider,
         conversationId: dto.conversationId,
         message: dto.message,
+        attachments,
         signal: controller.signal,
         emit,
       });
