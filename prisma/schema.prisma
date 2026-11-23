@@ -605,9 +605,35 @@ model AiConversationMessage {
   model          String?
   // Solo respuestas: 'done' | 'error' | 'stopped'
   status         String?
+  // Solo preguntas: archivos adjuntos [{ id, name, mimeType, kind, size }]
+  // (el contenido vive en ai_conversation_attachments).
+  attachments    Json?
   createdAt      DateTime @default(now())
 
   @@index([conversationId, createdAt])
   @@index([userId])
   @@map("ai_conversation_messages")
+}
+
+// Archivos que el usuario sube a Xoco IA (imágenes, PDF, texto/CSV). Se
+// guardan para mostrarlos en el chat y para volver a pasárselos a la IA en
+// las siguientes preguntas del mismo chat.
+model AiConversationAttachment {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  conversationId String   @db.ObjectId
+  messageId      String   @db.ObjectId
+  userId         String   @db.ObjectId
+  name           String
+  mimeType       String
+  // 'image' | 'pdf' | 'text'
+  kind           String
+  // Bytes del archivo original
+  size           Int
+  // base64 (imagen/PDF) o texto plano (archivos de texto)
+  data           String
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([messageId])
+  @@map("ai_conversation_attachments")
 }

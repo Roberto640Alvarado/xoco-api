@@ -23,6 +23,10 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  // Xoco IA recibe archivos en base64 dentro del JSON (hasta 20 MB en total,
+  // ~27 MB codificados): el límite por defecto de Express (100 KB) no alcanza.
+  app.useBodyParser('json', { limit: '30mb' });
+
   app.enableCors({ origin: configuredOrigins?.length ? configuredOrigins : DEFAULT_ORIGINS });
 
   app.useGlobalPipes(

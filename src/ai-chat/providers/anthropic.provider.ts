@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  AiAttachmentContent,
   AiChatMessage,
   AiSessionInput,
   AiProvider,
@@ -7,6 +8,7 @@ import {
   AiProviderSession,
   AiStep,
   AiToolResult,
+  attachmentTextBlock,
   providerErrorMessage,
 } from './provider.types.js';
 
@@ -25,6 +27,25 @@ interface AnthropicMessage {
   content: string | ContentBlock[];
 }
 
+function attachmentBlock(attachment: AiAttachmentContent): ContentBlock {
+  if (attachment.kind === 'image') {
+    return { type: 'image', source: { type: 'base64', media_type: attachment.mimeType, data: attachment.data } };
+  }
+  if (attachment.kind === 'pdf') {
+    return { type: 'document', title: attachment.name, source: { type: 'base64', media_type: 'application/pdf', data: attachment.data } };
+  }
+  return { type: 'text', text: attachmentTextBlock(attachment) };
+}
+
+/** Pregunta con adjuntos: primero los archivos y al final el texto (lo que recomienda Anthropic). */
+export function toAnthropicMessage(message: AiChatMessage): AnthropicMessage {
+  if (!message.attachments?.length) return { role: message.role, content: message.content };
+  return {
+    role: message.role,
+    content: [...message.attachments.map(attachmentBlock), { type: 'text', text: message.content }],
+  };
+}
+
 // Claude por la Messages API (fetch directo, sin SDK). La llave y el
 // modelo los da AiKeysService (panel o variable del servidor).
 @Injectable()
@@ -37,7 +58,7 @@ export class AnthropicProvider implements AiProvider {
     const { apiKey, model } = input;
     const label = this.label;
     const tools = input.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema }));
-    const messages: AnthropicMessage[] = input.messages.map((message) => ({ role: message.role, content: message.content }));
+    const messages: AnthropicMessage[] = input.messages.map(toAnthropicMessage);
 
     return {
       async step(signal?: AbortSignal): Promise<AiStep> {
