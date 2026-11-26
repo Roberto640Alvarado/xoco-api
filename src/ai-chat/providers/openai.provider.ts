@@ -7,6 +7,7 @@ import {
   AiProviderSession,
   AiSessionInput,
   AiStep,
+  AiStepOptions,
   AiToolResult,
   attachmentTextBlock,
   providerErrorMessage,
@@ -78,7 +79,8 @@ export class OpenAiProvider implements AiProvider {
     const items: ResponseItem[] = input.messages.map(toOpenAiItem);
 
     return {
-      async step(signal?: AbortSignal): Promise<AiStep> {
+      async step(signal?: AbortSignal, options?: AiStepOptions): Promise<AiStep> {
+        const toolChoice = options?.allowTools === false ? 'none' : 'auto';
         const response = await fetch(API_URL, {
           method: 'POST',
           signal,
@@ -87,7 +89,7 @@ export class OpenAiProvider implements AiProvider {
             model,
             instructions: input.system,
             input: items,
-            ...(tools.length ? { tools, tool_choice: 'auto' } : {}),
+            ...(tools.length ? { tools, tool_choice: toolChoice } : {}),
             ...(input.maxTokens ? { max_output_tokens: input.maxTokens } : {}),
             store: false,
             include: ['reasoning.encrypted_content'],

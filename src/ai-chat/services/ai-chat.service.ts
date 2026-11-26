@@ -6,10 +6,19 @@ import { AiChatMessage, AiProvider, AiProviderError, AiProviderKey, AiToolResult
 import { AiChatToolsService } from './ai-chat-tools.service.js';
 import { AiKeysService } from './ai-keys.service.js';
 import { AiUsageService } from './ai-usage.service.js';
-import { AiChart, AiTable, RENDER_TOOL_NAMES, RENDER_TOOLS, parseChart, parseTable } from './ai-render-tools.js';
+import { AiChart, AiFile, AiTable, RENDER_TOOL_NAMES, RENDER_TOOLS, parseChart, parseFile, parseTable } from './ai-render-tools.js';
 
-/** Pasos máximos (consulta → respuesta) por pregunta, para acotar costo y tiempo. */
-export const MAX_STEPS = 10;
+/**
+ * Sin límite práctico de pasos: la IA consulta lo que la pregunta necesite.
+ * Este tope solo es una red de seguridad contra un bucle infinito (un modelo
+ * que repite la misma consulta sin parar). Aun si se llega, el último paso es
+ * sin herramientas: responde con lo que ya consultó, nunca se queda a medias.
+ */
+export const MAX_STEPS = 60;
+
+/** Aviso (casi nunca debería verse) si aun en el último paso no respondió. */
+export const STEP_LIMIT_MESSAGE =
+  'Llegué al límite de consultas para una sola pregunta. Pídeme algo más concreto (una tienda o un período más corto) y sigo.';
 
 export type AiChatEvent =
   | { type: 'start'; provider: AiProviderKey; label: string; model: string }
@@ -17,6 +26,7 @@ export type AiChatEvent =
   | { type: 'text'; text: string }
   | { type: 'chart'; chart: AiChart }
   | { type: 'table'; table: AiTable }
+  | { type: 'file'; file: AiFile }
   | { type: 'done'; usage: { inputTokens: number; outputTokens: number }; steps: number }
   | { type: 'error'; message: string };
 
@@ -30,7 +40,13 @@ Cómo responder:
 - Montos en dólares con 2 decimales y separador de miles (ej. $14,532.10). Porcentajes con 1 decimal.
 - Si algo no se puede saber con los datos, dilo y sugiere cómo averiguarlo.
 - Eres solo de consulta: si te piden cambiar datos, explica que se hace en el panel.
-- Usa **negritas** para lo clave. Sin encabezados grandes.`;
+- Usa **negritas** para lo clave. Sin encabezados grandes.
+- Consulta todo lo que la pregunta necesite, sin quedarte a medias. Para ser rápido, pide en un mismo paso las consultas que no dependan entre sí y prefiere las herramientas que ya traen totales agregados (por tienda, por mes) antes que el detalle línea por línea.
+
+Archivos:
+- SÍ puedes generar archivos: Excel, PDF, CSV, texto (txt), Markdown (md) y JSON, con la herramienta "generar_archivo". Nunca digas que no puedes.
+- Cuando te pidan un archivo (o "pásamelo en Excel/PDF", "un reporte para descargar"): consulta los datos, llama a "generar_archivo" con el formato pedido (una tabla por hoja en Excel; en PDF un resumen en "contenido" más las tablas) y responde en una o dos líneas qué trae el archivo. No repitas toda la tabla en el chat.
+- Además, toda tabla y gráfica del chat trae botones "Excel" y "PDF" para descargarla.`;
 
 interface RunInput {
   user: User;
@@ -105,11 +121,17 @@ export class AiChatService {
           return;
         }
         steps += 1;
-        const step = await session.step(signal);
+        const lastStep = steps === MAX_STEPS;
+        const step = await session.step(signal, lastStep ? { allowTools: false } : undefined);
         usage.inputTokens += step.usage.inputTokens;
         usage.outputTokens += step.usage.outputTokens;
         if (step.text) emit({ type: 'text', text: step.text });
         if (step.toolCalls.length === 0) break;
+        if (lastStep) {
+          // El proveedor ignoró tool_choice "none": no hay más vueltas.
+          if (!step.text) emit({ type: 'text', text: STEP_LIMIT_MESSAGE });
+          break;
+        }
 
         const results: AiToolResult[] = [];
         for (const call of step.toolCalls) {
@@ -125,16 +147,18 @@ export class AiChatService {
             results.push({ id: call.id, name: call.name, output: 'error' in parsed ? parsed.error : 'Tabla mostrada al usuario.', isError: 'error' in parsed });
             continue;
           }
+          if (call.name === RENDER_TOOL_NAMES.file) {
+            const parsed = parseFile(call.input);
+            if ('file' in parsed) emit({ type: 'file', file: parsed.file });
+            results.push({ id: call.id, name: call.name, output: 'error' in parsed ? parsed.error : 'Archivo listo: el usuario ya ve el botón para descargarlo.', isError: 'error' in parsed });
+            continue;
+          }
           toolCalls += 1;
           emit({ type: 'tool', name: call.name, title: toolbox.titles.get(call.name) ?? call.name });
           const result = await toolbox.call(call.name, call.input);
           results.push({ id: call.id, name: call.name, ...result });
         }
         session.addToolResults(results);
-
-        if (steps === MAX_STEPS) {
-          emit({ type: 'text', text: 'Llegué al límite de consultas para una sola pregunta. Pídeme algo más concreto (una tienda o un período más corto) y sigo.' });
-        }
       }
 
       this.logger.log(`Xoco IA (${provider.key}/${model}) para ${user.email}: ${steps} pasos, ${usage.inputTokens}+${usage.outputTokens} tokens.`);

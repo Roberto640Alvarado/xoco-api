@@ -11,6 +11,7 @@ export type StoredBlock =
   | { kind: 'text'; text: string }
   | { kind: 'chart'; chart: unknown }
   | { kind: 'table'; table: unknown }
+  | { kind: 'file'; file: unknown }
   | { kind: 'error'; message: string };
 
 const MAX_HISTORY = 30;
@@ -28,6 +29,10 @@ export function blocksText(blocks: StoredBlock[]): string {
       if (block.kind === 'text') return block.text;
       if (block.kind === 'chart') return `[Gráfica mostrada: ${(block.chart as { titulo?: string }).titulo ?? ''}]`;
       if (block.kind === 'table') return `[Tabla mostrada: ${(block.table as { titulo?: string }).titulo ?? ''}]`;
+      if (block.kind === 'file') {
+        const file = block.file as { nombre?: string; formato?: string };
+        return `[Archivo generado: ${file.nombre ?? ''} (${file.formato ?? ''})]`;
+      }
       return '';
     })
     .filter(Boolean)
@@ -39,6 +44,7 @@ function toBlock(event: AiChatEvent): StoredBlock | null {
   if (event.type === 'text') return { kind: 'text', text: event.text };
   if (event.type === 'chart') return { kind: 'chart', chart: event.chart };
   if (event.type === 'table') return { kind: 'table', table: event.table };
+  if (event.type === 'file') return { kind: 'file', file: event.file };
   if (event.type === 'error') return { kind: 'error', message: event.message };
   return null;
 }

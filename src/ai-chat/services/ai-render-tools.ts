@@ -25,10 +25,51 @@ export const tableSchema = z.object({
   nota: z.string().max(240).optional(),
 });
 
+/** Tabla dentro de un archivo: admite más filas que la del chat (un Excel puede ser largo). */
+const fileTableSchema = tableSchema.extend({
+  filas: z.array(z.array(z.union([z.string(), z.number(), z.null()]))).max(5000),
+});
+
+export const FILE_FORMATS = ['excel', 'pdf', 'csv', 'txt', 'md', 'json'] as const;
+
+export const fileSchema = z
+  .object({
+    nombre: z.string().min(1).max(100),
+    formato: z.enum(FILE_FORMATS),
+    titulo: z.string().max(160).optional(),
+    contenido: z.string().max(200_000).optional(),
+    tablas: z.array(fileTableSchema).max(20).optional(),
+  })
+  .refine((file) => Boolean(file.contenido?.trim()) || Boolean(file.tablas?.length), {
+    message: 'El archivo necesita "contenido" o al menos una tabla en "tablas".',
+  });
+
 export type AiChart = z.infer<typeof chartSchema>;
 export type AiTable = z.infer<typeof tableSchema>;
+export type AiFile = z.infer<typeof fileSchema>;
 
-export const RENDER_TOOL_NAMES = { chart: 'mostrar_grafica', table: 'mostrar_tabla' } as const;
+export const RENDER_TOOL_NAMES = { chart: 'mostrar_grafica', table: 'mostrar_tabla', file: 'generar_archivo' } as const;
+
+const tableJsonSchema = {
+  type: 'object',
+  properties: {
+    titulo: { type: 'string' },
+    columnas: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          titulo: { type: 'string' },
+          formato: { type: 'string', enum: ['moneda', 'numero', 'porcentaje', 'texto'], description: 'porcentaje: en puntos (21.5 = 21.5%).' },
+        },
+        required: ['titulo'],
+      },
+    },
+    filas: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } } },
+    nota: { type: 'string' },
+  },
+  required: ['titulo', 'columnas', 'filas'],
+};
 
 export const RENDER_TOOLS: AiToolDefinition[] = [
   {
@@ -59,25 +100,25 @@ export const RENDER_TOOLS: AiToolDefinition[] = [
     name: RENDER_TOOL_NAMES.table,
     description:
       'Muestra una tabla en el chat con datos que YA consultaste (comparaciones, rankings, detalle por tienda o producto). Cada fila trae un valor por columna, en el mismo orden. Máximo 200 filas.',
+    inputSchema: tableJsonSchema,
+  },
+  {
+    name: RENDER_TOOL_NAMES.file,
+    description:
+      'Genera un archivo descargable para el usuario con datos que YA consultaste. Úsala siempre que pidan un Excel, PDF, CSV, texto, Markdown o JSON (o "pásamelo en archivo"). ' +
+      'excel: una hoja por cada tabla de "tablas". pdf: "titulo", luego "contenido" (texto, admite **negritas** y párrafos) y después las tablas. ' +
+      'csv: la primera tabla (o "contenido" si ya viene en CSV). txt / md: "contenido" y las tablas como texto. json: "contenido" si es JSON válido, si no las tablas como lista de objetos. ' +
+      'Los números van como número (sin "$" ni comas); el formato de la columna dice cómo mostrarlos. Hasta 5,000 filas por tabla.',
     inputSchema: {
       type: 'object',
       properties: {
-        titulo: { type: 'string' },
-        columnas: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              titulo: { type: 'string' },
-              formato: { type: 'string', enum: ['moneda', 'numero', 'porcentaje', 'texto'], description: 'porcentaje: en puntos (21.5 = 21.5%).' },
-            },
-            required: ['titulo'],
-          },
-        },
-        filas: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } } },
-        nota: { type: 'string' },
+        nombre: { type: 'string', description: 'Nombre del archivo sin extensión, ej. "ventas-octubre-2026-por-tienda".' },
+        formato: { type: 'string', enum: [...FILE_FORMATS] },
+        titulo: { type: 'string', description: 'Título del documento (encabezado del PDF).' },
+        contenido: { type: 'string', description: 'Texto del archivo: resumen/análisis en PDF, o el contenido completo en txt, md, csv o json.' },
+        tablas: { type: 'array', items: tableJsonSchema, description: 'Tablas del archivo (hojas en Excel).' },
       },
-      required: ['titulo', 'columnas', 'filas'],
+      required: ['nombre', 'formato'],
     },
   },
 ];
@@ -99,4 +140,17 @@ export function parseTable(input: unknown): { table: AiTable } | { error: string
   const table = parsed.data;
   const width = table.columnas.length;
   return { table: { ...table, filas: table.filas.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? null)) } };
+}
+
+/** Valida un archivo y deja cada fila de sus tablas con tantas celdas como columnas. */
+export function parseFile(input: unknown): { file: AiFile } | { error: string } {
+  const parsed = fileSchema.safeParse(input);
+  if (!parsed.success) return { error: `Archivo inválido: ${parsed.error.issues.map((issue) => `${issue.path.join('.')} ${issue.message}`).join('; ')}` };
+  const file = parsed.data;
+  const nombre = file.nombre.replace(/\.[a-z0-9]{2,5}$/i, '').trim() || 'xoco-ia';
+  const tablas = file.tablas?.map((table) => {
+    const width = table.columnas.length;
+    return { ...table, filas: table.filas.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? null)) };
+  });
+  return { file: { ...file, nombre, ...(tablas ? { tablas } : {}) } };
 }

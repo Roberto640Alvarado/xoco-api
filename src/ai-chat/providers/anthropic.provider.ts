@@ -7,6 +7,7 @@ import {
   AiProviderError,
   AiProviderSession,
   AiStep,
+  AiStepOptions,
   AiToolResult,
   attachmentTextBlock,
   providerErrorMessage,
@@ -14,7 +15,8 @@ import {
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
-const MAX_TOKENS = 4096;
+/** Alto para que quepa un archivo grande (tablas largas) en una sola respuesta. */
+const MAX_TOKENS = 16_000;
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -61,7 +63,8 @@ export class AnthropicProvider implements AiProvider {
     const messages: AnthropicMessage[] = input.messages.map(toAnthropicMessage);
 
     return {
-      async step(signal?: AbortSignal): Promise<AiStep> {
+      async step(signal?: AbortSignal, options?: AiStepOptions): Promise<AiStep> {
+        const toolChoice = options?.allowTools === false ? { tool_choice: { type: 'none' } } : {};
         const response = await fetch(API_URL, {
           method: 'POST',
           signal,
@@ -70,7 +73,7 @@ export class AnthropicProvider implements AiProvider {
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01',
           },
-          body: JSON.stringify({ model, max_tokens: input.maxTokens ?? MAX_TOKENS, system: input.system, ...(tools.length ? { tools } : {}), messages }),
+          body: JSON.stringify({ model, max_tokens: input.maxTokens ?? MAX_TOKENS, system: input.system, ...(tools.length ? { tools, ...toolChoice } : {}), messages }),
         });
         if (!response.ok) throw new AiProviderError(await providerErrorMessage(label, response), response.status);
 

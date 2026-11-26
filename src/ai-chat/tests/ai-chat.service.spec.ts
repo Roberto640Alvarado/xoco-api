@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Role, User } from '../../generated/prisma/index.js';
-import { AiChatEvent, AiChatService, MAX_STEPS } from '../services/ai-chat.service.js';
+import { AiChatEvent, AiChatService, MAX_STEPS, STEP_LIMIT_MESSAGE } from '../services/ai-chat.service.js';
 import type { AiChatToolsService, AiToolbox } from '../services/ai-chat-tools.service.js';
 import type { AiKeysService } from '../services/ai-keys.service.js';
 import type { AiUsageService } from '../services/ai-usage.service.js';
 import { AiProviderError, type AiProvider, type AiStep, type AiToolResult } from '../providers/provider.types.js';
-import { parseChart, parseTable } from '../services/ai-render-tools.js';
+import { parseChart, parseFile, parseTable } from '../services/ai-render-tools.js';
 
 const USER = { id: 'u1', email: 'admin@xoco.com', role: Role.SUPER_ADMIN } as User;
 
@@ -83,7 +83,7 @@ describe('AiChatService', () => {
     expect(session[0]).toMatchObject({ apiKey: 'sk-claude', model: 'claude-model' });
     expect(session[0].system).toContain('Xoco IA');
     expect(session[0].system).toContain('INSTRUCCIONES MCP');
-    expect(session[0].tools.map((tool) => tool.name)).toEqual(['xoco_venta_mensual', 'mostrar_grafica', 'mostrar_tabla']);
+    expect(session[0].tools.map((tool) => tool.name)).toEqual(['xoco_venta_mensual', 'mostrar_grafica', 'mostrar_tabla', 'generar_archivo']);
   });
 
   it('una gráfica mal armada vuelve como error al modelo y no se muestra', async () => {
@@ -101,11 +101,23 @@ describe('AiChatService', () => {
     expect(ctx.claude.received[0][0].output).toContain('deben ser iguales');
   });
 
-  it(`se detiene a los ${MAX_STEPS} pasos`, async () => {
+  it(`en el paso ${MAX_STEPS} pide responder sin herramientas`, async () => {
+    const consulta: AiStep = { text: '', toolCalls: [{ id: 'x', name: 'xoco_venta_mensual', input: {} }], usage };
+    const steps: AiStep[] = [...Array.from({ length: MAX_STEPS - 1 }, () => consulta), { text: 'Resumen con lo consultado.', toolCalls: [], usage }];
+    const ctx = setup(steps);
+    await ctx.service.run({ user: USER, provider: 'claude', messages: [{ role: 'user', content: 'x' }], emit: ctx.emit });
+    expect(ctx.toolbox.call).toHaveBeenCalledTimes(MAX_STEPS - 1);
+    const session = ctx.claude.startSession.mock.results[0].value as { step: ReturnType<typeof vi.fn> };
+    expect(session.step).toHaveBeenLastCalledWith(undefined, { allowTools: false });
+    expect(ctx.events.at(-2)).toEqual({ type: 'text', text: 'Resumen con lo consultado.' });
+    expect(ctx.events.at(-1)).toMatchObject({ type: 'done', steps: MAX_STEPS });
+  });
+
+  it('si aun así pide herramientas en el último paso, avisa y termina', async () => {
     const ctx = setup([{ text: '', toolCalls: [{ id: 'x', name: 'xoco_venta_mensual', input: {} }], usage }]);
     await ctx.service.run({ user: USER, provider: 'claude', messages: [{ role: 'user', content: 'x' }], emit: ctx.emit });
-    expect(ctx.toolbox.call).toHaveBeenCalledTimes(MAX_STEPS);
-    expect(ctx.events.at(-2)).toMatchObject({ type: 'text' });
+    expect(ctx.toolbox.call).toHaveBeenCalledTimes(MAX_STEPS - 1);
+    expect(ctx.events.at(-2)).toEqual({ type: 'text', text: STEP_LIMIT_MESSAGE });
     expect(ctx.events.at(-1)).toMatchObject({ type: 'done', steps: MAX_STEPS });
   });
 
@@ -134,5 +146,38 @@ describe('gráficas y tablas', () => {
     });
     const parsed = parseTable({ titulo: 'T', columnas: [{ titulo: 'A' }, { titulo: 'B', formato: 'moneda' }], filas: [['x']] });
     expect(parsed).toEqual({ table: { titulo: 'T', columnas: [{ titulo: 'A' }, { titulo: 'B', formato: 'moneda' }], filas: [['x', null]] } });
+  });
+});
+
+describe('archivos', () => {
+  it('valida el archivo, quita la extensión del nombre y rellena celdas', () => {
+    const result = parseFile({
+      nombre: 'ventas-octubre.xlsx',
+      formato: 'excel',
+      tablas: [{ titulo: 'Por tienda', columnas: [{ titulo: 'Tienda' }, { titulo: 'Venta', formato: 'moneda' }], filas: [['Escalón']] }],
+    });
+    expect(result).toEqual({
+      file: {
+        nombre: 'ventas-octubre',
+        formato: 'excel',
+        tablas: [{ titulo: 'Por tienda', columnas: [{ titulo: 'Tienda' }, { titulo: 'Venta', formato: 'moneda' }], filas: [['Escalón', null]] }],
+      },
+    });
+  });
+
+  it('rechaza un archivo vacío o de formato desconocido', () => {
+    expect(parseFile({ nombre: 'x', formato: 'pdf' })).toHaveProperty('error');
+    expect(parseFile({ nombre: 'x', formato: 'docx', contenido: 'hola' })).toHaveProperty('error');
+  });
+
+  it('el archivo llega como evento y la IA sabe que ya se mostró', async () => {
+    const ctx = setup([
+      { text: '', toolCalls: [{ id: 'f1', name: 'generar_archivo', input: { nombre: 'resumen', formato: 'txt', contenido: 'Hola' } }], usage },
+      { text: 'Listo, ahí está el archivo.', toolCalls: [], usage },
+    ]);
+    await ctx.service.run({ user: USER, provider: 'claude', messages: [{ role: 'user', content: 'x' }], emit: ctx.emit });
+    expect(ctx.events).toContainEqual({ type: 'file', file: { nombre: 'resumen', formato: 'txt', contenido: 'Hola' } });
+    expect(ctx.claude.received[0][0]).toMatchObject({ isError: false });
+    expect(ctx.toolbox.call).not.toHaveBeenCalled();
   });
 });

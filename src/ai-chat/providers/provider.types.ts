@@ -52,8 +52,13 @@ export function attachmentTextBlock(attachment: { name: string; text: string }):
 }
 
 /** Una conversación en curso con un proveedor: guarda sus mensajes en su propio formato. */
+export interface AiStepOptions {
+  /** false: el modelo ya no puede pedir herramientas y debe responder con lo que tiene. */
+  allowTools?: boolean;
+}
+
 export interface AiProviderSession {
-  step(signal?: AbortSignal): Promise<AiStep>;
+  step(signal?: AbortSignal, options?: AiStepOptions): Promise<AiStep>;
   addToolResults(results: AiToolResult[]): void;
 }
 
