@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 // Utilidades del flujo OAuth del conector MCP — puras, para poder probarlas.
 
@@ -18,6 +18,18 @@ export function verifyPkceS256(codeVerifier: string, codeChallenge: string): boo
   const computed = Buffer.from(createHash('sha256').update(codeVerifier).digest('base64url'));
   const expected = Buffer.from(codeChallenge);
   return computed.length === expected.length && timingSafeEqual(computed, expected);
+}
+
+/** HMAC-SHA256 apto para URL (secretos de cliente derivados, sin guardarlos). */
+export function hmacBase64Url(key: string, value: string): string {
+  return createHmac('sha256', key).update(value).digest('base64url');
+}
+
+/** Comparación en tiempo constante de dos cadenas. */
+export function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);

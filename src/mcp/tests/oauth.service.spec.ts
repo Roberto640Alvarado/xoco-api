@@ -47,6 +47,12 @@ function setup() {
       row.revokedAt = new Date();
       return true;
     }),
+    extendRefreshToken: vi.fn(async (id: string, expiresAt: Date) => {
+      const row = refresh.find((item) => item.id === id);
+      if (!row || row.revokedAt) return false;
+      row.expiresAt = expiresAt;
+      return true;
+    }),
   } as unknown as OAuthRepository;
 
   const users = {
@@ -136,5 +142,52 @@ describe('OAuthService', () => {
     await expect(
       ctx.service.validateAuthorize({ response_type: 'code', client_id: client.client_id, redirect_uri: 'https://otro.com/cb', code_challenge: 'x', code_challenge_method: 'S256' }),
     ).rejects.toThrow('redirect_uri');
+  });
+
+  describe('cliente confidencial (Gemini)', () => {
+    const GOOGLE_REDIRECT = 'https://oauth-redirect.googleusercontent.com/r/gemini';
+
+    async function authorizeConfidential(service: OAuthService) {
+      const client = await service.registerClient({ client_name: 'Gemini', redirect_uris: [GOOGLE_REDIRECT], token_endpoint_auth_method: 'client_secret_post' });
+      const verifier = 'g'.repeat(50);
+      const params = {
+        response_type: 'code',
+        client_id: client.client_id,
+        redirect_uri: GOOGLE_REDIRECT,
+        code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+        code_challenge_method: 'S256',
+      };
+      const user = await service.authenticate('fin@xoco.com', 'ok');
+      const code = await service.issueCode(user, params);
+      return { client, verifier, code };
+    }
+
+    it('el registro devuelve client_secret solo si lo pide', async () => {
+      const publicClient = await ctx.service.registerClient({ redirect_uris: [REDIRECT] });
+      expect(publicClient).not.toHaveProperty('client_secret');
+      expect(publicClient.token_endpoint_auth_method).toBe('none');
+      const { client } = await authorizeConfidential(ctx.service);
+      expect(client.token_endpoint_auth_method).toBe('client_secret_post');
+      expect(typeof (client as { client_secret?: string }).client_secret).toBe('string');
+    });
+
+    it('canjea el código con su secreto y el refresh token NO se rota', async () => {
+      const { client, verifier, code } = await authorizeConfidential(ctx.service);
+      const secret = (client as { client_secret?: string }).client_secret;
+      const auth = { client_id: client.client_id, client_secret: secret };
+      const first = await ctx.service.token({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: GOOGLE_REDIRECT, ...auth });
+      const second = await ctx.service.token({ grant_type: 'refresh_token', refresh_token: first.refresh_token, ...auth });
+      const third = await ctx.service.token({ grant_type: 'refresh_token', refresh_token: first.refresh_token, ...auth });
+      expect(second.refresh_token).toBe(first.refresh_token);
+      expect(third.refresh_token).toBe(first.refresh_token);
+      await expect(ctx.service.verifyAccessToken(third.access_token)).resolves.toMatchObject({ email: 'fin@xoco.com' });
+    });
+
+    it('un client_secret incorrecto se rechaza', async () => {
+      const { client, verifier, code } = await authorizeConfidential(ctx.service);
+      await expect(
+        ctx.service.token({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: client.client_id, client_secret: 'malo' }),
+      ).rejects.toThrow('Credenciales del cliente');
+    });
   });
 });

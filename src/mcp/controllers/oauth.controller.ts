@@ -34,14 +34,20 @@ function sendOAuthError(res: Response, error: unknown, logger: Logger, context: 
   throw error;
 }
 
-// Algunos clientes mandan client_id (y client_secret) en "Authorization: Basic"
-// en vez de en el cuerpo: se pasa al cuerpo para tratarlos igual.
+// Algunos clientes (Gemini) mandan client_id y client_secret en
+// "Authorization: Basic" (client_secret_basic) en vez de en el cuerpo: se
+// pasan al cuerpo para tratarlos igual. Lo que ya venga en el cuerpo manda.
 function withBasicClient(body: Record<string, unknown>, authorization: string | undefined): Record<string, unknown> {
-  if (!authorization?.startsWith('Basic ') || body.client_id !== undefined) return body;
+  if (!authorization?.startsWith('Basic ')) return body;
   try {
     const decoded = Buffer.from(authorization.slice(6), 'base64').toString('utf8');
-    const clientId = decodeURIComponent(decoded.split(':')[0] ?? '');
-    return clientId ? { ...body, client_id: clientId } : body;
+    const separator = decoded.indexOf(':');
+    const clientId = decodeURIComponent(separator >= 0 ? decoded.slice(0, separator) : decoded);
+    const clientSecret = separator >= 0 ? decodeURIComponent(decoded.slice(separator + 1)) : '';
+    const merged: Record<string, unknown> = { ...body };
+    if (merged.client_id === undefined && clientId) merged.client_id = clientId;
+    if (merged.client_secret === undefined && clientSecret) merged.client_secret = clientSecret;
+    return merged;
   } catch {
     return body;
   }

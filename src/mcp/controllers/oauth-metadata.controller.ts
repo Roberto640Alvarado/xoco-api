@@ -2,10 +2,10 @@ import { Controller, Get, Header, Req } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator.js';
-import { MCP_SCOPE } from '../services/oauth.service.js';
+import { MCP_SCOPE, TOKEN_ENDPOINT_AUTH_METHODS } from '../services/oauth.service.js';
 import { publicBaseUrl } from '../utils/public-url.util.js';
 
-// Metadatos OAuth que Claude.ai y ChatGPT leen al agregar el conector
+// Metadatos OAuth que Claude.ai, ChatGPT y Gemini leen al agregar el conector
 // (RFC 9728 y RFC 8414). Públicos: no revelan nada sensible.
 @ApiExcludeController()
 @Public()
@@ -38,7 +38,7 @@ export class OAuthMetadataController {
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: ['none'],
+      token_endpoint_auth_methods_supported: [...TOKEN_ENDPOINT_AUTH_METHODS],
       scopes_supported: [MCP_SCOPE],
     };
   }

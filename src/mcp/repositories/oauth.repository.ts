@@ -45,4 +45,10 @@ export class OAuthRepository {
     const result = await this.prisma.oAuthRefreshToken.updateMany({ where: { id, OR: [{ revokedAt: null }, { revokedAt: { isSet: false } }] }, data: { revokedAt: new Date() } });
     return result.count === 1;
   }
+
+  /** Extiende la vigencia de un refresh token SOLO si sigue vigente (clientes confidenciales: no se rota). */
+  async extendRefreshToken(id: string, expiresAt: Date): Promise<boolean> {
+    const result = await this.prisma.oAuthRefreshToken.updateMany({ where: { id, OR: [{ revokedAt: null }, { revokedAt: { isSet: false } }] }, data: { expiresAt } });
+    return result.count === 1;
+  }
 }
